@@ -1,8 +1,6 @@
 import numpy as np
 import tensorflow as tf
 
-#import config
-
 def embedding(num_embeddings, embed_size, indices):
     embeddings = tf.get_variable('embeddings', [num_embeddings, embed_size])
     embeddings = tf.nn.embedding_lookup(embeddings, indices)
@@ -114,11 +112,13 @@ def sarah_multilayer(inputs_3, layer_specs):
     """
     layer_specs: list of kwargs for each SARAh layer
     """
+    outputs_by_layer = []
     for i, kwargs in enumerate(layer_specs):
         with tf.variable_scope('SARAh_layer_%d' % i):
             outputs_3 = sarah(inputs_3, **kwargs)
+            outputs_by_layer.append(outputs_3)
             inputs_3 = outputs_3
-    return outputs_3
+    return outputs_3, outputs_by_layer
 
 def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, activation_fn=None,
         external_mem_3=None, external_seq_lens_1=None):
@@ -133,7 +133,8 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
         inputs_2 = feed_forward(inputs_2, cell.output_size, layer_norm=True, keep_prob=keep_prob)
         inputs_3 = tf.reshape(inputs_2,
             [tf.shape(inputs_3)[0], tf.shape(inputs_3)[1], cell.output_size])
-    outputs_3, finalStates = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1, dtype=tf.get_variable_scope().dtype)
+    outputs_3, finalStates = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1,
+        dtype=tf.get_variable_scope().dtype)
     if activation_fn is not None:
         outputs_3 = activation_fn(outputs_3)
     return outputs_3
@@ -149,10 +150,13 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.num_keys = 1 if external_mem_array is None else 2
         self.num_heads = num_heads
         self.keep_prob = keep_prob
-        self.memory = tf.TensorArray(tf.get_variable_scope().dtype, 0, dynamic_size=True, clear_after_read=False,
-                element_shape=[None, self.val_size+self.key_size], name='memTA')
+        self.memory = tf.TensorArray(tf.get_variable_scope().dtype, 0, dynamic_size=True,
+            clear_after_read=False, element_shape=[None, self.val_size+self.key_size], name='memTA')
         self.external_mem_array = external_mem_array
         if external_mem_array is not None:
+            if external_mem_array.shape[-1] != val_size + key_size:
+                raise ValueError("External mem has shape %s but must have depth of internal mem: %s"
+                    % (external_mem_array.shape, val_size + key_size))
             self.external_vals = external_mem_array[:, :, :val_size]
             self.external_keys = external_mem_array[:, :, -key_size:]
             self.external_seq_lens = external_seq_lens
