@@ -124,13 +124,43 @@ class Test_SARAh(unittest.TestCase):
     def test_compiles(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
-            inputs = tf.constant(np.random.rand(3, 6, 128), dtype=tf.float16)
-            seq_lens = [6, 3, 4]
-            outputs = layers.sarah(inputs, seq_lens, val_size=96, key_size=32, num_heads=4)
-            sess.run(tf.global_variables_initializer())
-            outputs = sess.run(outputs)
-            self.assertEqual(outputs.shape, (3, 6, 128))
+            with tf.variable_scope('SARAh', dtype=tf.float16):
+                inputs = tf.constant(np.random.rand(3, 6, 128), dtype=tf.float16)
+                seq_lens = [6, 3, 4]
+                outputs = layers.sarah(inputs, seq_lens, val_size=96, key_size=32, num_heads=4)
+                sess.run(tf.global_variables_initializer())
+                outputs = sess.run(outputs)
+                self.assertEqual(outputs.shape, (3, 6, 128))
+            with tf.variable_scope('SARAh_external_mem', dtype=tf.float16):
+                inputs = tf.constant(np.random.rand(3, 6, 160), dtype=tf.float16)
+                external_mem = tf.constant(np.random.rand(3, 13, 128), dtype=tf.float16)
+                outputs = layers.sarah(inputs, seq_lens, val_size=96, key_size=32, num_heads=4,
+                    external_mem_3=external_mem, external_seq_lens_1=[2, 4, 13])
+                sess.run(tf.global_variables_initializer())
+                outputs = sess.run(outputs)
+                self.assertEqual(outputs.shape, (3, 6, 128+32))
 
+    def test_multilayer_compiles(self):
+        with tf.Session() as sess:
+            with tf.variable_scope('sarah_multilayer', dtype=tf.float16):
+                inputs = tf.constant(np.random.rand(3, 6, 128), dtype=tf.float16)
+                seq_lens = [6, 3, 4]
+                layer_specs = [{'seq_lens_1':seq_lens,
+                           'val_size': 96,
+                           'key_size': 32,
+                           'num_heads': 4,
+                           'keep_prob': 0.5,
+                           'activation_fn': None},
+                          {'seq_lens_1':seq_lens,
+                           'val_size': 128,
+                           'key_size': 64,
+                           'num_heads': 2,
+                           'keep_prob': 1.0,
+                           'activation_fn': tf.nn.relu}]
+                outputs = layers.sarah_multilayer(inputs, layer_specs)
+                sess.run(tf.global_variables_initializer())
+                outputs = sess.run(outputs)
+                self.assertEqual(outputs.shape, (3, 6, 128 + 64))
 
 if __name__ == '__main__':
     unittest.main()
