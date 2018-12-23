@@ -187,5 +187,38 @@ class Test_SARAh(unittest.TestCase):
                 outputs = sess.run(outputs)
                 self.assertEqual(outputs.shape, (3, 12, 256))
 
+    def test_bidirectional_multilayer_compiles(self):
+        with tf.Session() as sess:
+            with tf.variable_scope('sarah_bidirectional_multilayer', dtype=tf.float16):
+                inputs = tf.constant(np.random.rand(3, 6, 128), dtype=tf.float16)
+                seq_lens = [6, 3, 4]
+                layer_specs = 2*[{'seq_lens_1':seq_lens,
+                           'val_size': 96,
+                           'key_size': 32,
+                           'num_heads': 4,
+                           'keep_prob': 0.5,
+                           'activation_fn': None,
+                           'bidirectional': True}]
+                outputs, out_by_layer = layers.sarah_multilayer(inputs, layer_specs)
+                sess.run(tf.global_variables_initializer())
+                outputs = sess.run(outputs)
+                self.assertEqual(outputs.shape, (3, 6, 128))
+
+            with tf.variable_scope('sarah_bidir_external_mem', dtype=tf.float16):
+                inputs = tf.constant(np.random.rand(3, 12, 128), dtype=tf.float16)
+                external_seq_lens = seq_lens # outputs above will be conditionin seq below
+                seq_lens = [6, 3, 12]
+                layer_specs = [{'seq_lens_1':seq_lens,
+                           'val_size': 96,
+                           'key_size': 32,
+                           'num_heads': 4,
+                           'keep_prob': 0.5,
+                           'external_mem_3': out_by_layer[1],
+                           'external_seq_lens_1': external_seq_lens,
+                           'activation_fn': None}]
+                outputs, _ = layers.sarah_multilayer(inputs, layer_specs)
+                sess.run(tf.global_variables_initializer())
+                outputs = sess.run(outputs)
+                self.assertEqual(outputs.shape, (3, 12, 160))
 if __name__ == '__main__':
     unittest.main()

@@ -121,20 +121,28 @@ def sarah_multilayer(inputs_3, layer_specs):
     return outputs_3, outputs_by_layer
 
 def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, activation_fn=None,
-        external_mem_3=None, external_seq_lens_1=None):
+        external_mem_3=None, external_seq_lens_1=None, bidirectional=False):
     """
     inputs_3: [batch_size, seq_len, dim]
     external_mem_3 = [batch_size, seq_len, dim]
     """
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
         external_seq_lens_1)
-    if inputs_3.shape[2].value != cell.output_size:
-        inputs_2 = tf.reshape(inputs_3, [-1, inputs_3.shape[2].value])
+    inshape = inputs_3.shape
+    if inshape[2].value != cell.output_size:
+        inputs_2 = tf.reshape(inputs_3, [-1, inshape[2].value])
         inputs_2 = feed_forward(inputs_2, cell.output_size, layer_norm=True, keep_prob=keep_prob)
-        inputs_3 = tf.reshape(inputs_2,
-            [tf.shape(inputs_3)[0], tf.shape(inputs_3)[1], cell.output_size])
-    outputs_3, finalStates = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1,
-        dtype=tf.get_variable_scope().dtype)
+        inputs_3 = tf.reshape(inputs_2, [inshape[0], inshape[1], cell.output_size])
+    if bidirectional:
+        with tf.variable_scope('backward'):
+            backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
+                external_seq_lens_1)
+        outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1,
+            dtype=tf.get_variable_scope().dtype)
+        outputs_3 = tf.contrib.layers.layer_norm(tf.add(*outputs_3))
+    else:
+        outputs_3, _ = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1,
+            dtype=tf.get_variable_scope().dtype)
     if activation_fn is not None:
         outputs_3 = activation_fn(outputs_3)
     return outputs_3
