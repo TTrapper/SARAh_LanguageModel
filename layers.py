@@ -45,7 +45,7 @@ def attention(values_3, keys_3, query_2, sequence_lengths_1):
     weights_2 = weights_2*scaling
     # mask the attention weights to the sequence lenghts before applying softmax
     sequence_mask_2 = tf.sequence_mask(sequence_lengths_1, maxlen=max_seq_len)
-    mask_values_2 = -tf.ones_like(weights_2)*2**16
+    mask_values_2 = -tf.ones_like(weights_2)*2**16 # -inf if dtype is float16
     weights_2 = tf.where(sequence_mask_2, weights_2, mask_values_2)
     # softmax and apply attention weights
     weights_2 = tf.nn.softmax(weights_2, axis=1)
@@ -118,21 +118,29 @@ def sarah_multilayer(inputs_3, layer_specs):
         with tf.variable_scope('SARAh_layer_%d' % i):
             outputs_3 = sarah(inputs_3, **kwargs)
             inputs_3 = outputs_3
+    return outputs_3
 
-def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, external_mem_3=None,
-    external_seq_lens_1=None):
+def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, activation_fn=None,
+        external_mem_3=None, external_seq_lens_1=None):
     """
     inputs_3: [batch_size, seq_len, dim]
     external_mem_3 = [batch_size, seq_len, dim]
     """
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
         external_seq_lens_1)
+    if inputs_3.shape[2].value != cell.output_size:
+        inputs_2 = tf.reshape(inputs_3, [-1, inputs_3.shape[2].value])
+        inputs_2 = feed_forward(inputs_2, cell.output_size,layer_norm=True, keep_prob=keep_prob)
+        inputs_3 = tf.reshape(inputs_2,
+            [tf.shape(inputs_3)[0], tf.shape(inputs_3)[1], cell.output_size])
     outputs_3, finalStates = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1, dtype=config.dtype)
+    if activation_fn is not None:
+        outputs_3 = activation_fn(outputs_3)
     return outputs_3
 
 class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
-        external_seq_lens=None, activations=tf.nn.relu):
+        external_seq_lens=None, keep_prob=1.0):
         """ """
         super(SelfAttentiveCell, self).__init__()
         self.val_size = val_size
@@ -140,7 +148,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.mem_size = key_size + val_size 
         self.num_keys = 1 if external_mem_array is None else 2
         self.num_heads = num_heads
-        self.activations = activations
+        self.keep_prob = keep_prob
         self.memory = tf.TensorArray(config.dtype, 0, dynamic_size=True, clear_after_read=False,
                 element_shape=[None, self.val_size+self.key_size], name='memTA')
         self.external_mem_array = external_mem_array
@@ -163,7 +171,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
             raise ValueError("Expected inputs.shape[-1] to be known, saw shape: %s" % inputs_shape)
         if input_depth != self.output_size:
             raise ValueError("Input size is %s but it must be the same as size of state + keys: %s"
-                % input_depth, output_size)
+                % (input_depth, self.output_size))
         kernel_in = self.val_size
         kernel_out = self.val_size + self.num_keys*self.key_size
         self._kernel = self.add_variable('weights', shape=[kernel_in, kernel_out])
@@ -195,10 +203,13 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
             query = inputs[:, -self.key_size:]
             inputs += multihead_attention(self.external_vals, self.external_keys, query,
                 self.external_seq_lens, self.num_heads)
+        inputs = tf.contrib.layers.layer_norm(inputs, trainable=True)
         output = tf.matmul(inputs, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
-        output = tf.contrib.layers.layer_norm(output, trainable=True,
-            activation_fn=self.activations)
+        output = tf.contrib.layers.layer_norm(output, trainable=True)
+        if self.keep_prob < 1.0:
+            output = tf.nn.dropout(output, keep_prob=self.keep_prob)
         # Add new value to memory
-        self.memory = self.memory.write(time, output[:, :self.mem_size])        
+        self.memory = self.memory.write(time, output[:, :self.mem_size])
+        # Apply activations and  send output
         return output, state + 1
