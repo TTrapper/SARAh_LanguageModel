@@ -65,9 +65,9 @@ class TestPipeline(unittest.TestCase):
                 shuffle_buffer=16)
             sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
             src_op, trg_op = iterator.get_next()
-            src, trg = sess.run([src_op, trg_op]) 
+            src, trg = sess.run([src_op, trg_op])
             self.assertEqual(src.dense_shape[2], max_word_len)
-            self.assertEqual(trg.dense_shape[2], max_word_len + 2)
+            self.assertEqual(trg.dense_shape[2], max_word_len + 2) # +2 for GO/STOP
 
     def test_max_line_len(self):
         tf.reset_default_graph()
@@ -79,9 +79,83 @@ class TestPipeline(unittest.TestCase):
                 shuffle_buffer=16)
             sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
             src_op, trg_op = iterator.get_next()
-            src, trg = sess.run([src_op, trg_op]) 
+            src, trg = sess.run([src_op, trg_op])
             self.assertEqual(src.dense_shape[1], max_line_len)
-            self.assertEqual(trg.dense_shape[1], max_line_len + 2)
+            self.assertEqual(trg.dense_shape[1], max_line_len + 2) # +2 for GO/STOP
+
+
+class TestData(unittest.TestCase):
+    def test_compiles(self):
+        tf.reset_default_graph()
+        with tf.Session() as sess:
+            batch_size = 2
+            max_word_len = 20
+            max_line_len = 64
+            basedir = './example_data/train_and_eval/'
+            data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
+            sess.run(tf.tables_initializer())
+            data.initialize(sess, data.traindir + '*')
+            src, trg_word_enc, trg_word_dec, trg = sess.run([data.src, data.trg_word_enc, data.trg_word_dec, data.trg])
+
+    def test_trg_follows_src(self):
+        tf.reset_default_graph()
+        with tf.Session() as sess:
+            batch_size = 6
+            max_word_len = 20
+            max_line_len = 64
+            basedir = './example_data/train_and_eval/'
+            data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
+            sess.run(tf.tables_initializer())
+            data.initialize(sess, data.traindir + '*')
+            src, _, _, trg = sess.run([data.src, data.trg_word_enc, data.trg_word_dec, data.trg])
+            print "**** TESTING THAT TRG LINES FOLLOW AFTER SRC LINES IN DATASET ****"
+            for src_str, trg_str in zip(data.array_to_strings(src), data.array_to_strings(trg)):
+                src_file, src_line = self.find_line_in_dataset(data.traindir, src_str)
+                print src_str
+                if src_file is None:
+                    print "Either this src line wasn't found or isn't unique"
+                    print
+                    continue
+                line_after_src =  open(data.traindir + src_file).readlines()[src_line + 1].strip()
+                print line_after_src
+                cleaned_trg = trg_str.replace(data.go_stop_token, '').strip()
+                print cleaned_trg
+                print
+                self.assertEqual(line_after_src, cleaned_trg)
+            print "**************************************************"
+
+    def find_line_in_dataset(self, datadir, line):
+        line = line.strip()
+        for fname in os.listdir(datadir):
+            lines = open(datadir + fname).readlines()
+            lines = [l.strip() for l in lines]
+            # only return index if line is unique in the file
+            indices = [i for i, file_line in enumerate(lines) if line == file_line]
+            if len(indices) == 1:
+                return fname, indices[0]
+        return None, -1
+
+    def test_manual_inspection(self):
+        tf.reset_default_graph()
+        with tf.Session() as sess:
+            batch_size = 6
+            max_word_len = 1024
+            max_line_len = 1024
+            basedir = './example_data/train_and_eval/'
+            data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
+            sess.run(tf.tables_initializer())
+            data.initialize(sess, data.traindir + '*')
+            src, trg_word_enc, trg_word_dec, trg = [data.array_to_strings(a) for a in
+                sess.run([data.src, data.trg_word_enc, data.trg_word_dec, data.trg])]
+
+            print "***** BEGIN MANUAL INSPECTION ******"
+            for src, trg_word_enc, trg_word_dec, trg in zip(src, trg_word_enc, trg_word_dec, trg):
+                print src
+                print data_pipe.replace_pad_chrs(trg_word_enc)
+                print data_pipe.replace_pad_chrs(trg_word_dec)
+                print data_pipe.replace_pad_chrs(trg)
+                print
+            print "***** END MANUAL INSPECTION ******"
 
 
 

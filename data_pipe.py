@@ -1,39 +1,66 @@
+import os
 import pickle
 from collections import Counter
 
 import tensorflow as tf
 
 class Data(object):
-    def __init__(self, basedir, batch_size):
+    def __init__(self, basedir, batch_size, max_word_len, max_line_len, go_stop_token=chr(0),
+        unk_token=chr(1)):
         self.basedir = basedir
         self.traindir = basedir + 'train/'
         self.validdir = basedir + 'valid/'
         self.testdir = basedir + 'test/'
-        self.iterator, self.filepattern = make_pipeline(batch_size)
-        self.chr_to_freq, self.id_to_chr = create_chr_dicts()
+        self.go_stop_token = go_stop_token
+        self.unk_token = unk_token
+        self.iterator, self.filepattern = make_pipeline(batch_size, max_word_len, max_line_len,
+            cycle_length=len(os.listdir(self.traindir)))
+        self.chr_to_freq, self.id_to_chr = self.create_chr_dicts()
         self.chr_to_id = tf.contrib.lookup.index_table_from_tensor(
-            self.id_to_chr, default_value='_')
-    
+            self.id_to_chr, default_value=self.id_to_chr.index(self.unk_token))
+        self.src, self.trg_word_enc, self.trg_word_dec, self.trg = self._prepare_data()
+
     def create_chr_dicts(self, max_num_chrs=None):
         chr_to_freq = None
         freq_path = self.basedir + '/chr_to_freq'
         if os.path.exists(freq_path):
             chr_to_freq = pickle.load(open(freq_path))
-        if chr_to_freq is None: 
-            chr_to_freq = Counter
+        if chr_to_freq is None:
+            chr_to_freq = Counter()
             for dirname in [self.traindir, self.validdir, self.testdir]:
                 for f in os.listdir(dirname):
-                    chr_to_freq += open(dirname + f, 'r').read()
-            pickle.dump(chr_to_freq, open(freq_path, 'wb'), chrdict)
-        if chr(0) in id_to_chr or chr(1) in id_to_chr:
+                    chr_to_freq += Counter(open(dirname + f, 'r').read())
+            pickle.dump(chr_to_freq, open(freq_path, 'wb'))
+        if self.go_stop_token in chr_to_freq or self.unk_token in chr_to_freq:
             raise ValueError('Reserved character found in dataset')
         id_to_chr = chr_to_freq.most_common(max_num_chrs)
         id_to_chr = sorted([c[0] for c in id_to_chr])
-        id_to_chr.extend([chr(0), chr(1)])
+        id_to_chr.extend([self.go_stop_token, self.unk_token])
         return chr_to_freq, id_to_chr
 
     def _prepare_data(self):
         src, trg = self.iterator.get_next()
+        # Input to encoder
+        src = self.chr_to_id.lookup(src)
+        src = tf.sparse_tensor_to_dense(src, default_value=-1)
+        # Decoder has different representations a different levels
+        trg = self.chr_to_id.lookup(trg)
+        trg = tf.sparse_tensor_to_dense(trg, default_value=-1)
+        # Input to word encoder of the target sentence decoder
+        trg_word_enc = trg[:, :-1, 1:-1] # remove STOP word, GO/STOP chr
+        # Input to word decoder of the target sentence Decoder
+        trg_word_dec = trg[:, 1:, :-1] # remove GO word, STOP chr
+        # Targets
+        targets = trg[:, 1:, 1:] # remove GO word, GO chr
+        return src, trg_word_enc, trg_word_dec, targets
+
+    def initialize(self, sess, filepattern):
+        sess.run(self.iterator.initializer, feed_dict={self.filepattern:filepattern})
+
+    def array_to_strings(self, array_3):
+        return [' '.join([''.join([self.id_to_chr[c] for c in word if c != -1])
+            for word in sentence]) for sentence in array_3]
+
 
 
 
