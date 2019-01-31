@@ -19,6 +19,10 @@ class Data(object):
         self.chr_to_id = tf.contrib.lookup.index_table_from_tensor(
             self.id_to_chr, default_value=self.id_to_chr.index(self.unk_token))
         self.src, self.trg_word_enc, self.trg_word_dec, self.trg = self._prepare_data()
+        self.src_sentence_len = self.get_sentence_lens(self.src)
+        self.trg_word_len = self.get_word_lens(self.trg)
+        self.trg_sentence_len = self.get_sentence_lens(self.trg_word_dec, self.trg_word_len)
+
 
     def create_chr_dicts(self, max_num_chrs=None):
         chr_to_freq = None
@@ -53,6 +57,21 @@ class Data(object):
         # Targets
         targets = trg[:, 1:, 1:] # remove GO word, GO chr
         return src, trg_word_enc, trg_word_dec, targets
+
+    def get_word_lens(self, char_ids_3):
+	mask_3 = tf.where(tf.equal(char_ids_3, -1), tf.zeros_like(char_ids_3),
+	    tf.ones_like(char_ids_3))
+	wordlens_2 = tf.reduce_sum(mask_3, axis=2)
+	return wordlens_2
+
+    def get_sentence_lens(self, char_ids_3, wordlens_2=None):
+	wordlens_2 = self.get_word_lens(char_ids_3) if wordlens_2 is None else wordlens_2
+	mask = tf.where(tf.equal(wordlens_2, 0), wordlens_2, tf.ones_like(wordlens_2))
+	sentence_lens_1 = tf.reduce_sum(mask, axis=1)
+	return sentence_lens_1
+
+
+
 
     def initialize(self, sess, filepattern):
         sess.run(self.iterator.initializer, feed_dict={self.filepattern:filepattern})

@@ -157,8 +157,28 @@ class TestData(unittest.TestCase):
                 print
             print "***** END MANUAL INSPECTION ******"
 
+    def test_seq_lens(self):
+        tf.reset_default_graph()
+        with tf.Session() as sess:
+            batch_size = 3
+            max_word_len = 16
+            max_line_len = 32
+            basedir = './example_data/train_and_eval/'
+            data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
+            sess.run(tf.tables_initializer())
+            data.initialize(sess, data.traindir + '*')
+            src, trg_word_enc, trg_word_dec, trg, src_sentence_len, trg_sentence_len, trg_word_len\
+                = sess.run([data.src, data.trg_word_enc, data.trg_word_dec, data.trg,
+                data.src_sentence_len, data.trg_sentence_len, data.trg_word_len])
+            src, trg_word_enc, trg_word_dec, trg = [data.array_to_strings(a) for a in
+                [src, trg_word_enc, trg_word_dec, trg]]
 
-
+            for src_sentence, trg_sentence, src_sent_len, trg_sent_len, trg_wrd_len in zip(
+                src, trg, src_sentence_len, trg_sentence_len, trg_word_len):
+                for word, length in zip(trg_sentence.split(' '), trg_wrd_len):
+                    self.assertEqual(len(word), length)
+                self.assertEqual(len(src_sentence.strip().split(' ')), src_sent_len)
+                self.assertEqual(len(trg_sentence.strip().split(' ')), trg_sent_len)
 
 
 
