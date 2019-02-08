@@ -1,5 +1,9 @@
+import math
 import numpy as np
 import tensorflow as tf
+
+def gelu(x):
+    return 0.5*x*(1+tf.tanh(math.sqrt(2/math.pi)*(x+0.044715*tf.pow(x, 3))))
 
 def embedding(num_embeddings, embed_size, indices):
     embeddings = tf.get_variable('embeddings', [num_embeddings, embed_size])
@@ -8,9 +12,12 @@ def embedding(num_embeddings, embed_size, indices):
 
 def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_prob=1.0):
     assert keep_prob >= 0.0 and keep_prob <= 1.0
-    weights = tf.get_variable('weights', [inputs.shape.as_list()[-1], num_nodes])
-    biases = tf.get_variable('biases', [num_nodes], initializer=tf.zeros_initializer())
-    outputs = tf.matmul(inputs, weights) + biases
+    with tf.variable_scope('feed_forward'):
+        weights = tf.get_variable('weights', [inputs.shape.as_list()[-1], num_nodes])
+        biases = tf.get_variable('biases', [num_nodes], initializer=tf.zeros_initializer())
+    indepth = tf.shape(inputs)[-1]
+    outshape = tf.concat([tf.shape(inputs)[:-1], [num_nodes]], axis=0)
+    outputs = tf.matmul(tf.reshape(inputs, [-1, indepth]), weights) + biases
     if layer_norm:
         outputs = tf.contrib.layers.layer_norm(outputs, center=True, scale=True, trainable=True,
             begin_norm_axis=1, begin_params_axis=-1)
@@ -18,7 +25,7 @@ def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_pr
         outputs = activation_fn(outputs)
     if keep_prob < 1.0:
         outputs = tf.nn.dropout(outputs, keep_prob)
-    return outputs
+    return tf.reshape(outputs, outshape)
 
 def mlp(inputs, layer_specs):
     """
@@ -108,14 +115,14 @@ def multihead_attention(values_3, keys_3, query_2, sequence_lengths_1, num_heads
     values_2 = tf.reduce_sum(values_3, axis=1)
     return values_2
 
-def sarah_multilayer(inputs_3, layer_specs):
+def sarah_multilayer(inputs_3, seq_lens_1, layer_specs):
     """
     layer_specs: list of kwargs for each SARAh layer
     """
     outputs_by_layer = []
     for i, kwargs in enumerate(layer_specs):
         with tf.variable_scope('SARAh_layer_%d' % i):
-            outputs_3 = sarah(inputs_3, **kwargs)
+            outputs_3 = sarah(inputs_3, seq_lens_1, **kwargs)
             outputs_by_layer.append(outputs_3)
             inputs_3 = outputs_3
     return outputs_3, outputs_by_layer
@@ -128,11 +135,10 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     """
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
         external_seq_lens_1)
-    inshape = inputs_3.shape
-    if inshape[2].value != cell.output_size:
-        inputs_2 = tf.reshape(inputs_3, [-1, inshape[2].value])
-        inputs_2 = feed_forward(inputs_2, cell.output_size, layer_norm=True, keep_prob=keep_prob)
-        inputs_3 = tf.reshape(inputs_2, [inshape[0], inshape[1], cell.output_size])
+    input_depth = inputs_3.shape.as_list()[-1]
+    if input_depth != cell.output_size:
+        with tf.variable_scope('sarah_in_projection'):
+            inputs_3 = feed_forward(inputs_3, cell.output_size, layer_norm=True, keep_prob=keep_prob)
     if bidirectional:
         with tf.variable_scope('backward'):
             backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
