@@ -155,7 +155,8 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
                 external_seq_lens_1)
         outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1, parallel_iterations=1,
             dtype=tf.get_variable_scope().dtype)
-        outputs_3 = outputs_3[0] + outputs_3[1] # combine forward/backward passes
+        # combine forward/backward passes
+        outputs_3 = tf.reduce_mean(tf.stack([outputs_3[0], outputs_3[1]]), axis=0)
     else:
         outputs_3, _ = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1, parallel_iterations=1,
             dtype=tf.get_variable_scope().dtype)
@@ -171,7 +172,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         super(SelfAttentiveCell, self).__init__()
         self.val_size = val_size
         self.key_size = key_size
-        self.mem_size = key_size + val_size 
+        self.mem_size = key_size + val_size
         self.num_keys = 1 if external_mem_array is None else 2
         self.num_heads = num_heads
         self.keep_prob = keep_prob
@@ -216,35 +217,32 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         # in the input tensor, then this will fail since the time counter will get stuck at that
         # specified sequence_length. What is wrong with using self.memory.size() ?
         time = tf.to_int32(tf.reduce_max(state))
+        query = inputs[:, self.val_size:self.val_size+self.key_size]
+        context = [inputs[:, :self.val_size]]
         # memory is empty for the first timestep
         attended = tf.cond(tf.equal(time, 0),
-            lambda: tf.zeros_like(inputs[:, :self.val_size]),
-            lambda: self._attend_to_memory(inputs, tf.squeeze(state)))
-        inputs = attended + inputs[:, :self.val_size]
+            lambda: inputs[:, :self.val_size],
+            lambda: self._attend_to_memory(query, tf.squeeze(state)))
+        context.append(attended)
         if self.external_mem_array is not None:
-            inputs += self._attend_to_memory(inputs, None, True)
-        inputs = do_layer_norm(inputs)
-        output = tf.matmul(inputs, self._kernel)
+            query = inputs[:, -self.key_size:] # not the same query used for internal mem
+            context.append(multihead_attention(self.external_vals, self.external_keys, query,
+                self.external_seq_lens, self.num_heads))
+        context = tf.reduce_mean(tf.stack(context), axis=0)
+        context = do_layer_norm(context)
+        output = tf.matmul(context, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
         if self.keep_prob < 1.0:
             output = tf.nn.dropout(output, keep_prob=self.keep_prob)
         # Add new value to memory
         self.memory = self.memory.write(time, output[:, :self.mem_size])
-        # FIXME: this is a hack which for some reason is needed to get the above write to take
+        # FIXME: this is a hack which for some reason is needed to get the above write to work.
         output += 1e-15*self.memory.read(time)[0,0] # forces output to depend on TA read.
         return output, state + 1
 
-    def _attend_to_memory(self, inputs, seq_lens, external=False):
-        if external:
-            # In this case the query is always the rightmost part of the inputs.
-            query = inputs[:, -self.key_size:]
-            return multihead_attention(self.external_vals, self.external_keys, query,
-                self.external_seq_lens, self.num_heads)
-        else:
-            # The query follows after the value portion of inputs.
-            query = inputs[:, self.val_size:self.val_size+self.key_size]
-            memory_3 = self.memory.stack() # [seq, batch, depth]
-            memory_3 = tf.transpose(memory_3, [1, 0, 2]) # [batch, seq, depth]
-            values = memory_3[:, :, :self.val_size]
-            keys = memory_3[:, :, -self.key_size:]
-            return multihead_attention(values, keys, query, seq_lens, self.num_heads)
+    def _attend_to_memory(self, query, seq_lens):
+        memory_3 = self.memory.stack() # [seq, batch, depth]
+        memory_3 = tf.transpose(memory_3, [1, 0, 2]) # [batch, seq, depth]
+        values = memory_3[:, :, :self.val_size]
+        keys = memory_3[:, :, -self.key_size:]
+        return multihead_attention(values, keys, query, seq_lens, self.num_heads)
