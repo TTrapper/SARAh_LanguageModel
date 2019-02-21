@@ -80,10 +80,7 @@ def train():
 #        print trg
 #        out_logits_4 = np.argmax(out_logits_4, axis=3)
 #        print out_logits_4
-
-
-
-        print
+#        print
 
 
 train()

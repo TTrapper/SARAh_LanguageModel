@@ -36,9 +36,9 @@ word_decoder_mlp = 4*[
     'keep_prob':keep_prob}]
 
 config = {
-          'max_grad_norm':1,
-          'learn_rate':1e-5,
-          'batch_size':8,
+          'max_grad_norm':5,
+          'learn_rate':1e-4,
+          'batch_size':16,
           'char_embed_size':32,
           'spell_vector_len':20,
           'max_word_len':20,
