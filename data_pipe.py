@@ -36,10 +36,10 @@ class Data(object):
                     chr_to_freq += Counter(open(dirname + f, 'r').read())
             pickle.dump(chr_to_freq, open(freq_path, 'wb'))
         if self.go_stop_token in chr_to_freq or self.unk_token in chr_to_freq:
-            raise ValueError('Reserved character found in dataset')
+            raise ValueError('Reserved character found in dataset:\n' + str(chr_to_freq))
+        chr_to_freq += Counter(self.go_stop_token + self.unk_token)
         id_to_chr = chr_to_freq.most_common(max_num_chrs)
         id_to_chr = sorted([c[0] for c in id_to_chr])
-        id_to_chr.extend([self.go_stop_token, self.unk_token])
         return chr_to_freq, id_to_chr
 
     def _prepare_data(self):
