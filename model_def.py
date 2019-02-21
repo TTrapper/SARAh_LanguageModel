@@ -41,7 +41,7 @@ class Model(object):
             char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
             spell_vectors_3 = self.create_spell_vector(char_embeds_4)
             # Send spelling-vectors through MLP
-            word_vectors_3 = layers.mlp(spell_vectors_3, config['word_encoder_layers'])
+            word_vectors_3 = layers.mlp(spell_vectors_3, config['word_encoder_mlp'])
         return word_vectors_3
 
     def build_sentence_encoder(self, word_vectors_3, sentence_lens_1):
@@ -62,28 +62,29 @@ class Model(object):
 
     def build_word_decoder(self, word_vectors_3, char_ids_3, word_lens_2):
         config = self.config
-        # Loop function operates over 1 batch element, which corresponds to a sentence
+#        gru = tf.keras.layers.GRU(256, return_sequences=True)
+        # Loop function operates over 1 batch element, which corresponds to a sentence/line
         def word_rnn(args):
             char_embeds_3, word_lens_1, word_vectors_2 = args
             """
-            char_embeds_3: [sentence_len, word_len, embed_size] char embeddings for this sentence
-            word_lens_1: [sentence_len] length of each word 
-            word_vectors_2: [sentence_len, word_vec_dim] outputs from sentence decoder
+            char_embeds_3: [num_words, num_chars, embed_size] char embeddings for this sentence
+            word_lens_1: [num_words] length of each word
+            word_vectors_2: [num_words, word_vec_dim] outputs from sentence decoder
             """
             with tf.variable_scope('word_decoder_loop'):
-                char_vectors_3 = layers.sarah(char_embeds_3, word_lens_1,
-                    **config['word_decoder_sarah'])
+#                char_vectors_3 = gru.apply(char_embeds_3)
+                char_vectors_3, _ = layers.sarah_multilayer(char_embeds_3, word_lens_1,
+                    config['word_decoder_sarah'])
                 char_vectors_3 = layers.feed_forward(char_vectors_3,
                     num_nodes=word_vectors_2.shape.as_list()[-1], activation_fn=layers.gelu,
                     keep_prob=self.config['keep_prob'])
-            word_vectors_3 = tf.expand_dims(word_vectors_2, axis=1) # prepare for broadcast 
-            char_vectors_3 += word_vectors_3
+            char_vectors_3 += tf.expand_dims(word_vectors_2, axis=1) # broadcast and add word rep
             return char_vectors_3
         with tf.variable_scope('word_encoder', reuse=True):
             char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
         with tf.variable_scope('word_decoder'):
             char_vectors_4 = tf.map_fn(word_rnn, [char_embeds_4, word_lens_2, word_vectors_3],
-                dtype=tf.float16)
+                dtype=tf.get_variable_scope().dtype)
             char_vectors_4 = layers.mlp(char_vectors_4, config['word_decoder_mlp'])
         with tf.variable_scope('logits'):
             char_logits_4 = layers.feed_forward(char_vectors_4, num_nodes=self.num_chars)
