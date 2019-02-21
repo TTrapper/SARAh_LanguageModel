@@ -218,17 +218,15 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         # specified sequence_length. What is wrong with using self.memory.size() ?
         time = tf.to_int32(tf.reduce_max(state))
         query = inputs[:, self.val_size:self.val_size+self.key_size]
-        context = [inputs[:, :self.val_size]]
-        # memory is empty for the first timestep
-        attended = tf.cond(tf.equal(time, 0),
-            lambda: inputs[:, :self.val_size],
-            lambda: self._attend_to_memory(query, tf.squeeze(state)))
-        context.append(attended)
+        value = inputs[:, :self.val_size]
+        # Memory is empty for the first timestep, otherwise apply attention to it
+        context = tf.cond(tf.equal(time, 0),
+            lambda: tf.stack([value]),
+            lambda: tf.stack([value, self._attend_to_memory(query, tf.squeeze(state))]))
         if self.external_mem_array is not None:
             query = inputs[:, -self.key_size:] # not the same query used for internal mem
-            context.append(multihead_attention(self.external_vals, self.external_keys, query,
-                self.external_seq_lens, self.num_heads))
-        context = tf.reduce_mean(tf.stack(context), axis=0)
+            context = tf.concat([context, [self._attend_to_external(query)]], axis=0)
+        context = tf.reduce_mean(context, axis=0)
         context = do_layer_norm(context)
         output = tf.matmul(context, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
@@ -246,3 +244,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         values = memory_3[:, :, :self.val_size]
         keys = memory_3[:, :, -self.key_size:]
         return multihead_attention(values, keys, query, seq_lens, self.num_heads)
+
+    def _attend_to_external(self, query):
+        return multihead_attention(self.external_vals, self.external_keys, query,
+            self.external_seq_lens, self.num_heads)
