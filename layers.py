@@ -5,9 +5,20 @@ import tensorflow as tf
 def gelu(x):
     return 0.5*x*(1+tf.tanh(math.sqrt(2/math.pi)*(x+0.044715*tf.pow(x, 3))))
 
+def do_layer_norm(tensor):
+    # NOTE layer norm is disabled
+    return tensor
+    return tf.contrib.layers.layer_norm(tensor, center=True, scale=True, trainable=True,
+        begin_norm_axis=-1, begin_params_axis=-1)
+
 def embedding(num_embeddings, embed_size, indices):
     embeddings = tf.get_variable('embeddings', [num_embeddings, embed_size])
+    # -1 indices are used for padding. Mask them (and results) to avoid lookup complaints.
+    mask = tf.where(tf.equal(indices, -1), tf.zeros_like(indices), tf.ones_like(indices))
+    indices *= mask
     embeddings = tf.nn.embedding_lookup(embeddings, indices)
+    mask = tf.cast(tf.expand_dims(mask, axis=mask.shape.ndims), embeddings.dtype)
+    embeddings *= mask
     return embeddings
 
 def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_prob=1.0):
@@ -19,8 +30,7 @@ def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_pr
     outshape = tf.concat([tf.shape(inputs)[:-1], [num_nodes]], axis=0)
     outputs = tf.matmul(tf.reshape(inputs, [-1, indepth]), weights) + biases
     if layer_norm:
-        outputs = tf.contrib.layers.layer_norm(outputs, center=True, scale=True, trainable=True,
-            begin_norm_axis=1, begin_params_axis=-1)
+        outputs = do_layer_norm(outputs)
     if activation_fn is not None:
         outputs = activation_fn(outputs)
     if keep_prob < 1.0:
@@ -131,7 +141,7 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
         external_mem_3=None, external_seq_lens_1=None, bidirectional=False):
     """
     inputs_3: [batch_size, seq_len, dim]
-    external_mem_3 = [batch_size, seq_len, dim]
+    external_mem_3 = [batch_size, seq_len, val_size + key_size]
     """
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
         external_seq_lens_1)
@@ -143,12 +153,13 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
         with tf.variable_scope('backward'):
             backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
                 external_seq_lens_1)
-        outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1,
+        outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1, parallel_iterations=1,
             dtype=tf.get_variable_scope().dtype)
-        outputs_3 = tf.contrib.layers.layer_norm(tf.add(*outputs_3))
+        outputs_3 = outputs_3[0] + outputs_3[1] # combine forward/backward passes
     else:
-        outputs_3, _ = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1,
+        outputs_3, _ = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1, parallel_iterations=1,
             dtype=tf.get_variable_scope().dtype)
+    outputs_3 = do_layer_norm(outputs_3)
     if activation_fn is not None:
         outputs_3 = activation_fn(outputs_3)
     return outputs_3
@@ -206,28 +217,34 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         # specified sequence_length. What is wrong with using self.memory.size() ?
         time = tf.to_int32(tf.reduce_max(state))
         # memory is empty for the first timestep
-        memory_tensor = tf.cond(tf.equal(self.memory.size(), 0),
-                lambda: tf.expand_dims(tf.zeros_like(inputs[:, :self.mem_size]), axis=0),
-                lambda: self.memory.stack())
-        # [batch_size, seq, output_size]
-        memory_tensor = tf.transpose(memory_tensor, [1, 0, 2])
-        values = memory_tensor[:, :, :self.val_size]
-        keys = memory_tensor[:, :, -self.key_size:]
-        query = inputs[:, self.val_size:self.val_size+self.key_size]
-        seq_lens = tf.squeeze(state)
-        attended = multihead_attention(values, keys, query, seq_lens, self.num_heads)
+        attended = tf.cond(tf.equal(time, 0),
+            lambda: tf.zeros_like(inputs[:, :self.val_size]),
+            lambda: self._attend_to_memory(inputs, tf.squeeze(state)))
         inputs = attended + inputs[:, :self.val_size]
         if self.external_mem_array is not None:
-            query = inputs[:, -self.key_size:]
-            inputs += multihead_attention(self.external_vals, self.external_keys, query,
-                self.external_seq_lens, self.num_heads)
-        inputs = tf.contrib.layers.layer_norm(inputs, trainable=True)
+            inputs += self._attend_to_memory(inputs, None, True)
+        inputs = do_layer_norm(inputs)
         output = tf.matmul(inputs, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
-        output = tf.contrib.layers.layer_norm(output, trainable=True)
         if self.keep_prob < 1.0:
             output = tf.nn.dropout(output, keep_prob=self.keep_prob)
         # Add new value to memory
         self.memory = self.memory.write(time, output[:, :self.mem_size])
-        # Apply activations and  send output
+        # FIXME: this is a hack which for some reason is needed to get the above write to take
+        output += 1e-15*self.memory.read(time)[0,0] # forces output to depend on TA read.
         return output, state + 1
+
+    def _attend_to_memory(self, inputs, seq_lens, external=False):
+        if external:
+            # In this case the query is always the rightmost part of the inputs.
+            query = inputs[:, -self.key_size:]
+            return multihead_attention(self.external_vals, self.external_keys, query,
+                self.external_seq_lens, self.num_heads)
+        else:
+            # The query follows after the value portion of inputs.
+            query = inputs[:, self.val_size:self.val_size+self.key_size]
+            memory_3 = self.memory.stack() # [seq, batch, depth]
+            memory_3 = tf.transpose(memory_3, [1, 0, 2]) # [batch, seq, depth]
+            values = memory_3[:, :, :self.val_size]
+            keys = memory_3[:, :, -self.key_size:]
+            return multihead_attention(values, keys, query, seq_lens, self.num_heads)
