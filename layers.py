@@ -6,8 +6,6 @@ def gelu(x):
     return 0.5*x*(1+tf.tanh(math.sqrt(2/math.pi)*(x+0.044715*tf.pow(x, 3))))
 
 def do_layer_norm(tensor):
-    # NOTE layer norm is disabled
-    return tensor
     return tf.contrib.layers.layer_norm(tensor, center=True, scale=True, trainable=True,
         begin_norm_axis=-1, begin_params_axis=-1)
 
@@ -153,12 +151,12 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
         with tf.variable_scope('backward'):
             backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
                 external_seq_lens_1)
-        outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1, parallel_iterations=1,
+        outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1,
             dtype=tf.get_variable_scope().dtype)
         # combine forward/backward passes
-        outputs_3 = tf.reduce_mean(tf.stack([outputs_3[0], outputs_3[1]]), axis=0)
+        outputs_3 = outputs_3[0] + outputs_3[1]
     else:
-        outputs_3, _ = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1, parallel_iterations=1,
+        outputs_3, _ = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1,
             dtype=tf.get_variable_scope().dtype)
     outputs_3 = do_layer_norm(outputs_3)
     if activation_fn is not None:
@@ -189,7 +187,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
 
     @property
     def state_size(self):
-        return 1
+        return (1, self.mem_size)
 
     @property
     def output_size(self):
@@ -216,29 +214,28 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         # FIXME: if the longest sequence length specified is shorter than the number of elements
         # in the input tensor, then this will fail since the time counter will get stuck at that
         # specified sequence_length. What is wrong with using self.memory.size() ?
-        time = tf.to_int32(tf.reduce_max(state))
+        seq_lens, new_mem_val = state
+        time = tf.to_int32(tf.reduce_max(seq_lens))
         query = inputs[:, self.val_size:self.val_size+self.key_size]
         value = inputs[:, :self.val_size]
         # Memory is empty for the first timestep, otherwise apply attention to it
         context = tf.cond(tf.equal(time, 0),
-            lambda: tf.stack([value]),
-            lambda: tf.stack([value, self._attend_to_memory(query, tf.squeeze(state))]))
+            lambda: tf.zeros_like(value),
+            lambda: self._attend_to_memory(time, new_mem_val, query, seq_lens))
         if self.external_mem_array is not None:
             query = inputs[:, -self.key_size:] # not the same query used for internal mem
-            context = tf.concat([context, [self._attend_to_external(query)]], axis=0)
-        context = tf.reduce_mean(context, axis=0)
-        context = do_layer_norm(context)
-        output = tf.matmul(context, self._kernel)
+            context += self._attend_to_external(query)
+        value = do_layer_norm(value + context)
+        output = tf.matmul(value, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
+        output = do_layer_norm(output)
         if self.keep_prob < 1.0:
             output = tf.nn.dropout(output, keep_prob=self.keep_prob)
-        # Add new value to memory
-        self.memory = self.memory.write(time, output[:, :self.mem_size])
-        # FIXME: this is a hack which for some reason is needed to get the above write to work.
-        output += 1e-15*self.memory.read(time)[0,0] # forces output to depend on TA read.
-        return output, state + 1
+        return output, (seq_lens + 1, output[:, :self.mem_size])
 
-    def _attend_to_memory(self, query, seq_lens):
+    def _attend_to_memory(self, time, new_mem_val, query, seq_lens):
+        seq_lens = tf.squeeze(seq_lens)
+        self.memory = self.memory.write(time, new_mem_val)
         memory_3 = self.memory.stack() # [seq, batch, depth]
         memory_3 = tf.transpose(memory_3, [1, 0, 2]) # [batch, seq, depth]
         values = memory_3[:, :, :self.val_size]
