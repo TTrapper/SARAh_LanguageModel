@@ -92,7 +92,7 @@ class TestPipeline(unittest.TestCase):
             go_stop_token = chr(0)
             unk_token = chr(1)
             src_place, trg_place, src_txt, trg_txt = data_pipe.make_inference_pipeline()
-            _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/train_and_eval/train/',
+            _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/',
                 go_stop_token, unk_token)
             (src,
              trg_word_enc,
@@ -125,7 +125,7 @@ class TestData(unittest.TestCase):
             batch_size = 2
             max_word_len = 20
             max_line_len = 64
-            basedir = './example_data/train_and_eval/train'
+            basedir = './example_data/'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
@@ -137,7 +137,7 @@ class TestData(unittest.TestCase):
             batch_size = 6
             max_word_len = 20
             max_line_len = 64
-            basedir = './example_data/train_and_eval/train'
+            basedir = './example_data/'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
@@ -175,7 +175,7 @@ class TestData(unittest.TestCase):
             batch_size = 6
             max_word_len = 1024
             max_line_len = 1024
-            basedir = './example_data/train_and_eval/train'
+            basedir = './example_data/'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
@@ -197,7 +197,7 @@ class TestData(unittest.TestCase):
             batch_size = 3
             max_word_len = 16
             max_line_len = 32
-            basedir = './example_data/train_and_eval/train'
+            basedir = './example_data/'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')

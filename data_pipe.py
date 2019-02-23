@@ -7,7 +7,7 @@ import tensorflow as tf
 class Data(object):
     def __init__(self, datadir, batch_size, max_word_len, max_line_len, go_stop_token=chr(0),
         unk_token=chr(1)):
-        self.datadir = datadir + '/'
+        self.datadir = datadir
         self.go_stop_token = go_stop_token
         self.unk_token = unk_token
         (self.chr_to_freq,
