@@ -82,6 +82,40 @@ class TestPipeline(unittest.TestCase):
             src, trg = sess.run([src_op, trg_op])
             self.assertEqual(src.dense_shape[1], max_line_len)
             self.assertEqual(trg.dense_shape[1], max_line_len + 2) # +2 for GO/STOP
+    
+    def test_inference_pipeline(self):
+        tf.reset_default_graph()
+        with tf.Session() as sess:
+            batch_size = 1
+            max_word_len = 10
+            max_line_len = 10
+            go_stop_token = chr(0)
+            unk_token = chr(1)
+            src_place, trg_place, src_txt, trg_txt = data_pipe.make_inference_pipeline()
+            _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/train_and_eval/train/',
+                go_stop_token, unk_token)
+            (src,
+             trg_word_enc,
+             trg_word_dec,
+             targets,
+             src_sentence_len,
+             trg_word_len,
+             trg_sentence_len) = data_pipe.sparse_chr_to_dense_id(chr_to_id, src_txt, trg_txt)
+            sess.run(tf.tables_initializer())
+            print sess.run(src_txt, feed_dict={src_place: 'hi I am a string run through a place .'})
+            print sess.run(trg_txt, feed_dict={trg_place: 'i would like to show you somehting'})
+            src_ids = sess.run(src, feed_dict={src_place: 'I am a string that has been made a tensor'})
+            print src_ids
+            print src_ids.shape
+            trg_word_enc = sess.run(trg_word_enc, feed_dict={trg_place: 'I am a string that has been made a tensor'})
+            print trg_word_enc
+            print trg_word_enc.shape
+            trg_word_len = sess.run(trg_word_len, feed_dict={trg_place: 'I am a string that has been made a tensor'})
+            print trg_word_len
+            print trg_word_len.shape
+            src_sentence_len = sess.run(src_sentence_len, feed_dict={src_place: 'I am a string that has been made a tensor'})
+            print src_sentence_len
+            print src_sentence_len.shape
 
 
 class TestData(unittest.TestCase):
@@ -91,10 +125,10 @@ class TestData(unittest.TestCase):
             batch_size = 2
             max_word_len = 20
             max_line_len = 64
-            basedir = './example_data/train_and_eval/'
+            basedir = './example_data/train_and_eval/train'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
-            data.initialize(sess, data.traindir + '*')
+            data.initialize(sess, data.datadir + '*')
             src, trg_word_enc, trg_word_dec, trg = sess.run([data.src, data.trg_word_enc, data.trg_word_dec, data.trg])
 
     def test_trg_follows_src(self):
@@ -103,20 +137,20 @@ class TestData(unittest.TestCase):
             batch_size = 6
             max_word_len = 20
             max_line_len = 64
-            basedir = './example_data/train_and_eval/'
+            basedir = './example_data/train_and_eval/train'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
-            data.initialize(sess, data.traindir + '*')
+            data.initialize(sess, data.datadir + '*')
             src, _, _, trg = sess.run([data.src, data.trg_word_enc, data.trg_word_dec, data.trg])
             print "**** TESTING THAT TRG LINES FOLLOW AFTER SRC LINES IN DATASET ****"
             for src_str, trg_str in zip(data.array_to_strings(src), data.array_to_strings(trg)):
-                src_file, src_line = self.find_line_in_dataset(data.traindir, src_str)
+                src_file, src_line = self.find_line_in_dataset(data.datadir, src_str)
                 print src_str
                 if src_file is None:
                     print "Either this src line wasn't found or isn't unique"
                     print
                     continue
-                line_after_src =  open(data.traindir + src_file).readlines()[src_line + 1].strip()
+                line_after_src =  open(data.datadir + src_file).readlines()[src_line + 1].strip()
                 print line_after_src
                 cleaned_trg = trg_str.replace(data.go_stop_token, '').strip()
                 print cleaned_trg
@@ -141,10 +175,10 @@ class TestData(unittest.TestCase):
             batch_size = 6
             max_word_len = 1024
             max_line_len = 1024
-            basedir = './example_data/train_and_eval/'
+            basedir = './example_data/train_and_eval/train'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
-            data.initialize(sess, data.traindir + '*')
+            data.initialize(sess, data.datadir + '*')
             src, trg_word_enc, trg_word_dec, trg = [data.array_to_strings(a) for a in
                 sess.run([data.src, data.trg_word_enc, data.trg_word_dec, data.trg])]
 
@@ -163,15 +197,27 @@ class TestData(unittest.TestCase):
             batch_size = 3
             max_word_len = 16
             max_line_len = 32
-            basedir = './example_data/train_and_eval/'
+            basedir = './example_data/train_and_eval/train'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
-            data.initialize(sess, data.traindir + '*')
-            src, trg_word_enc, trg_word_dec, trg, src_sentence_len, trg_sentence_len, trg_word_len\
-                = sess.run([data.src, data.trg_word_enc, data.trg_word_dec, data.trg,
-                data.src_sentence_len, data.trg_sentence_len, data.trg_word_len])
-            src, trg_word_enc, trg_word_dec, trg = [data.array_to_strings(a) for a in
-                [src, trg_word_enc, trg_word_dec, trg]]
+            data.initialize(sess, data.datadir + '*')
+            (src,
+             trg_word_enc,
+             trg_word_dec,
+             trg,
+             src_sentence_len,
+             trg_sentence_len,
+             trg_word_len) = sess.run([data.src,
+                                       data.trg_word_enc,
+                                       data.trg_word_dec,
+                                       data.trg,
+                                       data.src_sentence_len,
+                                       data.trg_sentence_len,
+                                       data.trg_word_len])
+            [src,
+             trg_word_enc,
+             trg_word_dec,
+             trg] = [data.array_to_strings(a) for a in [src, trg_word_enc, trg_word_dec, trg]]
 
             for src_sentence, trg_sentence, src_sent_len, trg_sent_len, trg_wrd_len in zip(
                 src, trg, src_sentence_len, trg_sentence_len, trg_word_len):
