@@ -234,7 +234,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         return output, (seq_lens + 1, output[:, :self.mem_size])
 
     def _attend_to_memory(self, time, new_mem_val, query, seq_lens):
-        seq_lens = tf.squeeze(seq_lens)
+        seq_lens = tf.squeeze(seq_lens, axis=1)
         self.memory = self.memory.write(time, new_mem_val)
         memory_3 = self.memory.stack() # [seq, batch, depth]
         memory_3 = tf.transpose(memory_3, [1, 0, 2]) # [batch, seq, depth]
