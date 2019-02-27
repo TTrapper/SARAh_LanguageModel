@@ -1,5 +1,7 @@
 import argparse
 from collections import deque
+import os
+import sys
 
 import numpy as np
 import tensorflow as tf
@@ -8,12 +10,9 @@ import data_pipe
 import model_def
 import config
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--datadir', type=str, required=True)
-args = parser.parse_args()
 
-def build_model(data, conf):
-    with tf.variable_scope('Model', dtype=tf.float32):
+def build_model(data, conf, reuse=False):
+    with tf.variable_scope('Model', dtype=tf.float32, reuse=reuse) as scope:
         model = model_def.Model(data.src,
             data.src_sentence_len,
             data.trg_word_enc,
@@ -22,7 +21,18 @@ def build_model(data, conf):
             data.trg_word_len,
             len(data.chr_to_freq),
             conf)
-    return model
+        scope.reuse_variables()
+        # Create a copy of the model that operates over the inference pipeline
+        conf = config.generate_config(1.0)
+        free_model = model_def.Model(data.src_inference,
+            data.src_sentence_len_inference,
+            data.trg_word_enc_inference,
+            data.trg_sentence_len_inference,
+            data.trg_word_dec_inference,
+            data.trg_word_len_inference,
+            len(data.chr_to_freq),
+            conf)
+    return model, free_model
 
 def calc_loss(logits, targets, word_lens, sentence_lens):
     mask = tf.where(tf.equal(targets, -1), tf.zeros_like(targets), tf.ones_like(targets))
@@ -46,41 +56,60 @@ def build_train_op(loss, learn_rate, max_grad_norm):
     train_op = optimizer.apply_gradients(zip(grads, tvars))
     return train_op, grads, norm
 
+def run_inference(model, data, conf, sess, softmax_temp=1e-24):
+    # TODO: This is very slow because the entire model is rerun for each char prediction
+    paths = [args.datadir + p for p in os.listdir(args.datadir)]
+    condition = data_pipe.getRandomSentence(paths, numSamples=1, sampleRange=1)[0][0]
+    condition = condition.strip()
+    print condition
+    result = ''
+    char_idx = 0
+    word_idx = 0
+    try:
+        for char_count in range(128):
+            feed = {data.src_place:condition, data.trg_place:result.strip(), model.softmax_temp:softmax_temp}
+            predictions = sess.run(model.predictions_3, feed_dict=feed)
+            next_char = data.id_to_chr[predictions[0, word_idx, char_idx]]
+            if next_char == data.go_stop_token:
+                if char_idx == 0: # EOS
+                    print result
+                    return
+                next_char = ' '
+                word_idx += 1
+                char_idx = -1
+            result += next_char
+            char_idx += 1
+    except Exception as e:
+        print 'Inference failed: '
+        print e
+        print result
+
 def train():
-    conf = config.config
+    conf = config.generate_config()
     data = data_pipe.Data(args.datadir, conf['batch_size'], conf['max_word_len'], conf['max_line_len'])
-    model = build_model(data, conf)
+    model, free_model = build_model(data, conf)
     loss = calc_loss(model.out_logits_4, data.trg, data.trg_word_len, data.trg_sentence_len)
     train_op, grads, norm = build_train_op(loss, conf['learn_rate'], conf['max_grad_norm'])
     sess = tf.Session()
+    saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=1)
     sess.run(tf.tables_initializer())
     sess.run(tf.global_variables_initializer())
-    data.initialize(sess, data.traindir + '*')
+    data.initialize(sess, data.datadir + '*')
     recent_costs = deque(maxlen=100)
+    batch_num = 0
     while True:
-        _, g, n, c, out_logits_4, trg, trg_word_dec, trg_word_enc = sess.run(
-            [train_op,
-                grads,
-                norm,
-                loss,
-                model.out_logits_4,
-                data.trg,
-                data.trg_word_dec,
-                data.trg_word_enc])
-
+        [_,n,c] = sess.run([train_op,norm,loss])
         recent_costs.append(c)
-        print sum(recent_costs)/len(recent_costs), n
-
-#        print trg_word_enc.shape
-#        print data_pipe.replace_pad_chrs('\n'.join(data.array_to_strings(trg_word_enc)))
-#        print trg_word_dec.shape
-#        print data_pipe.replace_pad_chrs('\n'.join(data.array_to_strings(trg_word_dec)))
-#        print trg.shape
-#        print data_pipe.replace_pad_chrs('\n'.join(data.array_to_strings(trg)))
-#        print trg
-#        out_logits_4 = np.argmax(out_logits_4, axis=3)
-#        print out_logits_4
-#        print
+        if batch_num%250 == 0:
+            print batch_num, sum(recent_costs)/len(recent_costs), n
+            saver.save(sess, './saves/model.ckpt')
+            run_inference(free_model, data, conf, sess)
+            sys.stdout.flush()
+        batch_num += 1
 
 
-train()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--datadir', type=str, required=True)
+    args = parser.parse_args()
+    train()

@@ -1,6 +1,7 @@
 import os
 import pickle
 from collections import Counter
+import random
 
 import tensorflow as tf
 
@@ -156,7 +157,7 @@ def sparse_chr_to_dense_id(chr_to_id, src, trg):
     trg = chr_to_id.lookup(trg)
     trg = tf.sparse_tensor_to_dense(trg, default_value=-1)
     # Input to word encoder of the target sentence decoder
-    trg_word_enc = trg[:, :-1, 1:-1] # remove STOP word, GO/STOP chr
+    trg_word_enc = trg[:, :-1, 1:] # remove STOP word, GO chr
     # Input to word decoder of the target sentence Decoder
     trg_word_dec = trg[:, 1:, :-1] # remove GO word, STOP chr
     # Targets
@@ -200,3 +201,17 @@ def replace_pad_chrs(txt, replacements={chr(0):'_', chr(1):''}):
     for old, new in replacements.iteritems():
         txt = txt.replace(old, new)
     return txt
+
+def getRandomSentence(paths, numSamples=1, sampleRange=1):
+    randFile = random.choice(paths)
+    lines = list(open(randFile))
+    if len(lines) >= numSamples:
+        samples = []
+        for sampleNum in range(numSamples):
+            idx = random.randint(0, len(lines)-sampleRange)
+            samples.append(lines[idx:idx+sampleRange])
+        return samples
+    else:
+        print 'WARNING: file has fewer lines than samples: ' + randFile
+        return []
+

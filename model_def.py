@@ -15,8 +15,13 @@ class Model(object):
         trg_word_enc_3 = self.build_word_encoder(trg_word_enc_3, reuse_vars=True)
         trg_word_enc_3 = self.build_sentence_decoder(trg_word_enc_3, trg_sent_len_1,
             src_sentence_3_by_layer, src_sent_len_1)
-        # Generate target sentence chars by decoding word vectors
+        # Generate target sentence char predictions by decoding word vectors
         self.out_logits_4 = self.build_word_decoder(trg_word_enc_3, trg_word_dec_3, trg_word_len_2)
+        # Ops for generating predictions durng inference
+        self.softmax_temp = tf.placeholder(self.out_logits_4.dtype, name='softmax_temp', shape=[])
+        logits_2 = tf.reshape(self.out_logits_4, [-1, num_chars])
+        predictions_2 = tf.multinomial(logits_2/self.softmax_temp, num_samples=1)
+        self.predictions_3 = tf.reshape(predictions_2, tf.shape(self.out_logits_4)[:-1])
 
     def create_spell_vector(self, char_embeds_4, pad=True):
         config = self.config

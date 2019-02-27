@@ -86,37 +86,35 @@ class TestPipeline(unittest.TestCase):
     def test_inference_pipeline(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
-            batch_size = 1
-            max_word_len = 10
-            max_line_len = 10
+            src_line = 'This is a source line which should end up the same for both pipes .\n'
+            trg_line = 'This is a target line which should also look the same regardless of pipe .'
+            with open('./tmp_test_data', 'w') as tmp_data:
+                tmp_data.write(src_line)
+                tmp_data.write(trg_line)
+
+            batch_size = 2 # applies to regular pipeline only.
+            max_word_len = 20
+            max_line_len = 32
             go_stop_token = chr(0)
             unk_token = chr(1)
-            src_place, trg_place, src_txt, trg_txt = data_pipe.make_inference_pipeline()
             _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/',
                 go_stop_token, unk_token)
-            (src,
-             trg_word_enc,
-             trg_word_dec,
-             targets,
-             src_sentence_len,
-             trg_word_len,
-             trg_sentence_len) = data_pipe.sparse_chr_to_dense_id(chr_to_id, src_txt, trg_txt)
+            # file pipeline
+            iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
+                shuffle_buffer=1)
+            sess.run(iterator.initializer, feed_dict={filepattern:'./tmp_test_data'})
+            src_op, trg_op = iterator.get_next()
+            file_op = data_pipe.sparse_chr_to_dense_id(chr_to_id, src_op, trg_op)
+            # placeholder pipeline
+            src_place, trg_place, src_op, trg_op = data_pipe.make_inference_pipeline()
+            placeholder_ops = data_pipe.sparse_chr_to_dense_id(chr_to_id, src_op, trg_op)
             sess.run(tf.tables_initializer())
-            print sess.run(src_txt, feed_dict={src_place: 'hi I am a string run through a place .'})
-            print sess.run(trg_txt, feed_dict={trg_place: 'i would like to show you somehting'})
-            src_ids = sess.run(src, feed_dict={src_place: 'I am a string that has been made a tensor'})
-            print src_ids
-            print src_ids.shape
-            trg_word_enc = sess.run(trg_word_enc, feed_dict={trg_place: 'I am a string that has been made a tensor'})
-            print trg_word_enc
-            print trg_word_enc.shape
-            trg_word_len = sess.run(trg_word_len, feed_dict={trg_place: 'I am a string that has been made a tensor'})
-            print trg_word_len
-            print trg_word_len.shape
-            src_sentence_len = sess.run(src_sentence_len, feed_dict={src_place: 'I am a string that has been made a tensor'})
-            print src_sentence_len
-            print src_sentence_len.shape
-
+            placeholder_results = sess.run(placeholder_ops, feed_dict={src_place:src_line.strip(), trg_place:trg_line})
+            file_results =  sess.run(file_op)
+            # Should get identical data representations from placeholder as from file
+            for placepipe, filepipe in zip(file_results, placeholder_results):
+                # filepipe has batch_size 2 with identical etries, placepipe is broadcasted
+                self.assertTrue(np.equal(placepipe, filepipe).all()) #
 
 class TestData(unittest.TestCase):
     def test_compiles(self):
