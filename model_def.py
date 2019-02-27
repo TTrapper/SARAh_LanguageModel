@@ -70,7 +70,7 @@ class Model(object):
 #        gru = tf.keras.layers.GRU(256, return_sequences=True)
         # Loop function operates over 1 batch element, which corresponds to a sentence/line
         def word_rnn(args):
-            char_embeds_3, word_lens_1, word_vectors_2 = args
+            char_embeds_3, word_lens_1 = args
             """
             char_embeds_3: [num_words, num_chars, embed_size] char embeddings for this sentence
             word_lens_1: [num_words] length of each word
@@ -80,16 +80,16 @@ class Model(object):
 #                char_vectors_3 = gru.apply(char_embeds_3)
                 char_vectors_3, _ = layers.sarah_multilayer(char_embeds_3, word_lens_1,
                     config['word_decoder_sarah'])
-                char_vectors_3 = layers.feed_forward(char_vectors_3,
-                    num_nodes=word_vectors_2.shape.as_list()[-1], activation_fn=layers.gelu,
-                    keep_prob=self.config['keep_prob'])
-            char_vectors_3 += tf.expand_dims(word_vectors_2, axis=1) # broadcast and add word rep
             return char_vectors_3
         with tf.variable_scope('word_encoder', reuse=True):
             char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
         with tf.variable_scope('word_decoder'):
-            char_vectors_4 = tf.map_fn(word_rnn, [char_embeds_4, word_lens_2, word_vectors_3],
+            char_vectors_4 = tf.map_fn(word_rnn, [char_embeds_4, word_lens_2],
                 dtype=tf.get_variable_scope().dtype)
+            char_vectors_4 = layers.feed_forward(char_vectors_4,
+                num_nodes=word_vectors_3.shape.as_list()[-1], activation_fn=layers.gelu,
+                keep_prob=self.config['keep_prob'])
+            char_vectors_4 += tf.expand_dims(word_vectors_3, axis=2) # broadcast and add word rep
             char_vectors_4 = layers.mlp(char_vectors_4, config['word_decoder_mlp'])
         with tf.variable_scope('logits'):
             char_logits_4 = layers.feed_forward(char_vectors_4, num_nodes=self.num_chars)
