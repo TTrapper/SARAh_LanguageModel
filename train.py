@@ -79,6 +79,7 @@ def run_inference(model, data, conf, sess, softmax_temp=1e-24):
                 char_idx = -1
             result += next_char
             char_idx += 1
+        print result
     except Exception as e:
         print 'Inference failed: '
         print e
