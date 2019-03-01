@@ -13,11 +13,16 @@ class TestPipeline(unittest.TestCase):
             batch_size = 2
             max_word_len = 20
             max_line_len = 64
-            iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
+            unk_token = chr(1)
+            _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/', unk_token)
+            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id,
                 shuffle_buffer=16)
-            sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
+            sess.run(tf.tables_initializer())
+            sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*'})
+
             src_op, trg_op = iterator.get_next()
             src, trg = sess.run([src_op, trg_op])
+            print src.shape, trg.shape
 
     def test_produces_expected(self):
         src0 = "ALBERT EINSTEIN REFERENCE ARCHIVE             \nData should be ascii or otherwise encode " +\
