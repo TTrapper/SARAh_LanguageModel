@@ -25,9 +25,9 @@ class Data(object):
     def initialize(self, sess, filepattern):
         sess.run(self.iterator.initializer, feed_dict={self.filepattern:filepattern})
 
-    def array_to_strings(self, array_3):
-        return [' '.join([''.join([self.id_to_chr[c] for c in word if c != -1])
-            for word in sentence]) for sentence in array_3]
+    def array_to_strings(self, array_2):
+        return array_to_strings(array_2, self.id_to_chr)
+
 
 def make_pipeline(batch_size, chr_to_id, cycle_length=128, shuffle_buffer=4096):
     do_shuffle = shuffle_buffer > 1
@@ -47,7 +47,8 @@ def make_pipeline(batch_size, chr_to_id, cycle_length=128, shuffle_buffer=4096):
 def _make_file_processor_fn(chr_to_id):
     def examples_from_file(filename):
         lines = tf.data.TextLineDataset(filename)
-        src = lines.map(_make_line_processor_fn(chr_to_id))
+        lines = lines.map(_make_line_processor_fn(chr_to_id))
+        src = lines
         trg = lines.skip(1)
         pair = tf.data.Dataset.zip((src, trg))
         return pair
@@ -57,13 +58,14 @@ def _make_line_processor_fn(chr_to_id):
     def line_processor(line):
         line = _split_chars(line)
         line = chr_to_id.lookup(line)
-        line = tf.sparse_tensor_to_dense(line)
+        line = tf.sparse.to_dense(line)
         return line
     return line_processor
 
 def _split_chars(line):
     line = tf.expand_dims(line, axis=0)
     line = tf.string_split(line, delimiter='')
+    line = tf.sparse.reshape(line, line.dense_shape[1:]) # squeeze expanded dim
     return line
 
 def _make_pad_to_batch_fn(batch_size):
@@ -119,14 +121,18 @@ def get_sentence_lens(char_ids_3, wordlens_2=None):
     sentence_lens_1 = tf.reduce_sum(mask, axis=1)
     return sentence_lens_1
 
-def char_array_to_txt(char_array_3):
-    return '\n'.join([' '.join([''.join(word) for word in line]) for line in char_array_3])
+def array_to_strings(array_2, id_to_chr):
+    results = []
+    for line in array_2:
+        results.append(''.join([id_to_chr[i] for i in line]))
+    return results
 
 def replace_pad_chrs(txt, replacements={chr(0):'_', chr(1):''}):
     for old, new in replacements.iteritems():
         txt = txt.replace(old, new)
     return txt
 
+# FIXME camel
 def getRandomSentence(paths, numSamples=1, sampleRange=1):
     randFile = random.choice(paths)
     lines = list(open(randFile))
