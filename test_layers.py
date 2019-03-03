@@ -127,7 +127,13 @@ class Test_Attention(unittest.TestCase):
             # 3rd batch element has sequence len 6, attention should average them
             diff = attended[2] - np.mean(values[2, :, :], axis=0)
             self.assertTrue(np.greater(1e-15, diff).all())
-
+            # no seq_lens provided should be equivalent to all full length sequences
+            seq_lens = [6, 6, 6]
+            full_length = layers.multihead_attention(values, keys, query, seq_lens, num_heads)
+            no_length = layers.multihead_attention(values, keys, query, None, num_heads)
+            sess.run(tf.global_variables_initializer())
+            full_length, no_length = sess.run([full_length, no_length])
+            self.assertTrue(np.equal(full_length, no_length).all())
 
 class Test_SARAh(unittest.TestCase):
     def test_compiles(self):

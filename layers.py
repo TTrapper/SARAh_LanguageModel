@@ -105,12 +105,13 @@ def multihead_attention(values_3, keys_3, query_2, sequence_lengths_1, num_heads
     with tf.variable_scope('attention', reuse=tf.AUTO_REUSE):
         scaling = tf.get_variable('scaling', shape=(), dtype=weights_3.dtype)
     weights_3 = weights_3*scaling
-    # mask the attention weights to the sequence lenghts before applying softmax
-    sequence_mask_2 = tf.sequence_mask(sequence_lengths_1, maxlen=max_seq_len)
-    sequence_mask_3 = tf.expand_dims(sequence_mask_2, axis=1)
-    sequence_mask_3 = tf.tile(sequence_mask_3, [1, num_heads, 1])
-    mask_values_3 = -tf.ones_like(weights_3)*2**16
-    weights_3 = tf.where(sequence_mask_3, weights_3, mask_values_3)
+    # mask the attention weights to the sequence lengths before applying softmax
+    if sequence_lengths_1 is not None:
+        sequence_mask_2 = tf.sequence_mask(sequence_lengths_1, maxlen=max_seq_len)
+        sequence_mask_3 = tf.expand_dims(sequence_mask_2, axis=1)
+        sequence_mask_3 = tf.tile(sequence_mask_3, [1, num_heads, 1])
+        mask_values_3 = -tf.ones_like(weights_3)*2**16
+        weights_3 = tf.where(sequence_mask_3, weights_3, mask_values_3)
     # softmax and apply attention weights
     weights_3 = tf.nn.softmax(weights_3, axis=2)
     weights_4 = tf.expand_dims(weights_3, axis=3)
