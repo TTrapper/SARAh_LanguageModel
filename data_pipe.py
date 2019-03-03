@@ -6,10 +6,8 @@ import random
 import tensorflow as tf
 
 class Data(object):
-    def __init__(self, datadir, batch_size, max_word_len, max_line_len, go_stop_token=chr(0),
-        unk_token=chr(1)):
+    def __init__(self, datadir, batch_size, unk_token=chr(1)):
         self.datadir = datadir
-        self.go_stop_token = go_stop_token
         self.unk_token = unk_token
         (self.chr_to_freq,
          self.id_to_chr,
@@ -20,7 +18,7 @@ class Data(object):
             cycle_length=len(os.listdir(self.datadir)))
         src, trg = self.iterator.get_next()
         # Build pipeline for running inference
-        self.src_place, self.trg_place, src, trg = make_inference_pipeline()
+        self.src_place, self.trg_place, src, trg = make_inference_pipeline(chr_to_id)
 
     def initialize(self, sess, filepattern):
         sess.run(self.iterator.initializer, feed_dict={self.filepattern:filepattern})
@@ -29,7 +27,7 @@ class Data(object):
         return array_to_strings(array_2, self.id_to_chr)
 
 
-def make_pipeline(batch_size, chr_to_id, cycle_length=128, shuffle_buffer=4096):
+def make_pipeline(batch_size, chr_to_id, cycle_length, shuffle_buffer=4096):
     do_shuffle = shuffle_buffer > 1
     sloppy = do_shuffle
     filepattern = tf.placeholder(dtype=tf.string, name='filepattern')
@@ -93,9 +91,9 @@ def create_chr_dicts(dirname, unk_token, max_num_chrs=None):
             chr_to_freq += Counter(open(dirname + f, 'r').read().decode('utf-8'))
     if unk_token in chr_to_freq:
         raise ValueError('Reserved character found in dataset:\n' + str(chr_to_freq))
+    chr_to_freq = chr_to_freq.most_common(max_num_chrs)
     chr_to_freq += Counter(unk_token)
-    id_to_chr = chr_to_freq.most_common(max_num_chrs)
-    id_to_chr = sorted([c[0] for c in id_to_chr])
+    id_to_chr = sorted([c[0] for c in chr_to_freq])
     chr_to_id = tf.contrib.lookup.index_table_from_tensor(
         id_to_chr, default_value=id_to_chr.index(unk_token))
     return chr_to_freq, id_to_chr, chr_to_id

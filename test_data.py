@@ -20,13 +20,15 @@ class TestPipeline(unittest.TestCase):
     def test_compiles(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
+            datadir = './example_data/'
             batch_size = 2
             unk_token = chr(1)
-            _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/', unk_token)
-            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id,
+            file_cycle_len = len(os.listdir(datadir))
+            _, _, chr_to_id = data_pipe.create_chr_dicts(datadir, unk_token)
+            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id, file_cycle_len,
                 shuffle_buffer=16)
             sess.run(tf.tables_initializer())
-            sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*'})
+            sess.run(iterator.initializer, feed_dict={filepattern:datadir + '*'})
             src_op, trg_op = iterator.get_next()
             src, trg = sess.run([src_op, trg_op])
 
@@ -36,8 +38,9 @@ class TestPipeline(unittest.TestCase):
             datadir = './example_data/'
             batch_size = 7
             unk_token = chr(1)
+            file_cycle_len = len(os.listdir(datadir))
             _, id_to_chr, chr_to_id = data_pipe.create_chr_dicts(datadir, unk_token)
-            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id,
+            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id, file_cycle_len,
                 shuffle_buffer=16)
             sess.run(tf.tables_initializer())
             sess.run(iterator.initializer, feed_dict={filepattern:datadir + '*'})
@@ -65,12 +68,12 @@ class TestPipeline(unittest.TestCase):
             with open('./tmp_test_data', 'w') as tmp_data:
                 tmp_data.write(src_line)
                 tmp_data.write(trg_line)
-
             batch_size = 2 # applies to regular pipeline only.
             unk_token = chr(1)
-            _, id_to_chr, chr_to_id = data_pipe.create_chr_dicts(datadir, unk_token)
+            file_cycle_len = 1
+            _, id_to_chr, chr_to_id = data_pipe.create_chr_dicts(datadir, unk_token, file_cycle_len)
             # file pipeline
-            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id,
+            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id, file_cycle_len,
                 shuffle_buffer=16)
             sess.run(iterator.initializer, feed_dict={filepattern:'./tmp_test_data'})
             src_op, trg_op = iterator.get_next()
