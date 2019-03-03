@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 
 import tensorflow as tf
@@ -6,91 +7,59 @@ import numpy as np
 
 import data_pipe
 
+def find_line_in_dataset(datadir, line):
+    line = line.strip()
+    for fname in os.listdir(datadir):
+        lines = open(datadir + fname).readlines()
+        indices = [i for i, file_line in enumerate(lines) if line == file_line.strip()]
+        if len(indices) > 0:
+            return fname, indices
+    return fname, []
+
 class TestPipeline(unittest.TestCase):
     def test_compiles(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
             batch_size = 2
-            max_word_len = 20
-            max_line_len = 64
             unk_token = chr(1)
             _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/', unk_token)
             iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id,
                 shuffle_buffer=16)
             sess.run(tf.tables_initializer())
             sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*'})
-
             src_op, trg_op = iterator.get_next()
             src, trg = sess.run([src_op, trg_op])
-            print src.shape, trg.shape
 
-    def test_produces_expected(self):
-        src0 = "ALBERT EINSTEIN REFERENCE ARCHIVE             \nData should be ascii or otherwise encode " +\
-               "1 byte per character: Tensorflow's string_split doesn't play nice otherwise."
-        trg0 = "___ _RELATIVITY:_ _THE_ _SPECIAL_ _AND_ _GENERAL_ _THEORY_ ___      \n___ _Words_ " +\
-               "_are_ _assumed_ _to_ _be_ _be_ _delimited_ _by_ _a_ _single_ _space_ _character._ ___"
-        src1 = "RELATIVITY: THE SPECIAL AND GENERAL THEORY      \nWords are assumed to be be delimited" +\
-               " by a single space character."
-        trg1 = "___ _BY_ _ALBERT_ _EINSTEIN_ ___                 \n___ _The_ _source/target_ _pairs_ _are_ " +\
-               "_selected_ _by_ _choosing_ _concurrent_ _lines,_ _so_ _each_ _line_ _is_ " +\
-               "_considered_ _the_ _target_ _for_ _the_ _previous_ _line._ ___"
-
-        def next_batch(sess, src_op, trg_op):
-            src, trg = sess.run([src_op, trg_op])
-            src = data_pipe.char_array_to_txt(src)
-            src = data_pipe.replace_pad_chrs(src)
-            trg = data_pipe.char_array_to_txt(trg)
-            trg = data_pipe.replace_pad_chrs(trg)
-            return src, trg
-
+    def test_trg_follows_src(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
-            batch_size = 2
-            max_word_len = 1024
-            max_line_len = 1024
-            iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
-                cycle_length=2, shuffle_buffer=1)
-            sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
-            src_op, trg_op = [tf.sparse_tensor_to_dense(t, default_value=chr(1))
-                for t in iterator.get_next()]
-            src, trg = next_batch(sess, src_op, trg_op)
-            self.assertEqual(src, src0)
-            self.assertEqual(trg, trg0)
-            src, trg = next_batch(sess, src_op, trg_op)
-            self.assertEqual(src, src1)
-            self.assertEqual(trg, trg1)
-
-    def test_max_word_len(self):
-        tf.reset_default_graph()
-        with tf.Session() as sess:
-            batch_size = 2
-            max_word_len = 4
-            max_line_len = 1024
-            iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
+            datadir = './example_data/'
+            batch_size = 7
+            unk_token = chr(1)
+            _, id_to_chr, chr_to_id = data_pipe.create_chr_dicts(datadir, unk_token)
+            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id,
                 shuffle_buffer=16)
-            sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
+            sess.run(tf.tables_initializer())
+            sess.run(iterator.initializer, feed_dict={filepattern:datadir + '*'})
             src_op, trg_op = iterator.get_next()
-            src, trg = sess.run([src_op, trg_op])
-            self.assertEqual(src.dense_shape[2], max_word_len)
-            self.assertEqual(trg.dense_shape[2], max_word_len + 2) # +2 for GO/STOP
+            for batch in range(4): # Do the check over a few batches
+                src, trg = sess.run([src_op, trg_op])
+                src = data_pipe.array_to_strings(src, id_to_chr)
+                trg = data_pipe.array_to_strings(trg, id_to_chr)
+                for src, trg in zip(src, trg):
+                    # check lines can be found in dataset
+                    src_filename, src_indices = find_line_in_dataset(datadir, src)
+                    self.assertTrue(len(src_indices) > 0)
+                    trg_filename, trg_indices = find_line_in_dataset(datadir, trg)
+                    self.assertTrue(len(trg_indices) > 0)
+                    # check trg lines follow from src (if the lines are unique)
+                    if (len(src_indices) == 1 and len(trg_indices) == 1):
+                        self.assertTrue(src_indices[0] + 1 == trg_indices[0])
 
-    def test_max_line_len(self):
-        tf.reset_default_graph()
-        with tf.Session() as sess:
-            batch_size = 2
-            max_word_len = 1024
-            max_line_len = 4
-            iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
-                shuffle_buffer=16)
-            sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
-            src_op, trg_op = iterator.get_next()
-            src, trg = sess.run([src_op, trg_op])
-            self.assertEqual(src.dense_shape[1], max_line_len)
-            self.assertEqual(trg.dense_shape[1], max_line_len + 2) # +2 for GO/STOP
-    
     def test_inference_pipeline(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
+            datadir = './example_data/'
             src_line = 'This is a source line which should end up the same for both pipes .\n'
             trg_line = 'This is a target line which should also look the same regardless of pipe .'
             with open('./tmp_test_data', 'w') as tmp_data:
@@ -98,28 +67,24 @@ class TestPipeline(unittest.TestCase):
                 tmp_data.write(trg_line)
 
             batch_size = 2 # applies to regular pipeline only.
-            max_word_len = 20
-            max_line_len = 32
-            go_stop_token = chr(0)
             unk_token = chr(1)
-            _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/',
-                go_stop_token, unk_token)
+            _, id_to_chr, chr_to_id = data_pipe.create_chr_dicts(datadir, unk_token)
             # file pipeline
-            iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
-                shuffle_buffer=1)
+            iterator, filepattern = data_pipe.make_pipeline(batch_size, chr_to_id,
+                shuffle_buffer=16)
             sess.run(iterator.initializer, feed_dict={filepattern:'./tmp_test_data'})
             src_op, trg_op = iterator.get_next()
-            file_op = data_pipe.sparse_chr_to_dense_id(chr_to_id, src_op, trg_op)
+            file_ops = [src_op, trg_op]
             # placeholder pipeline
-            src_place, trg_place, src_op, trg_op = data_pipe.make_inference_pipeline()
-            placeholder_ops = data_pipe.sparse_chr_to_dense_id(chr_to_id, src_op, trg_op)
+            src_place, trg_place, src_op, trg_op = data_pipe.make_inference_pipeline(chr_to_id)
+            placeholder_ops = [src_op, trg_op]
             sess.run(tf.tables_initializer())
             placeholder_results = sess.run(placeholder_ops, feed_dict={src_place:src_line.strip(), trg_place:trg_line})
-            file_results =  sess.run(file_op)
+            file_results =  sess.run(file_ops)
             # Should get identical data representations from placeholder as from file
             for placepipe, filepipe in zip(file_results, placeholder_results):
                 # filepipe has batch_size 2 with identical etries, placepipe is broadcasted
-                self.assertTrue(np.equal(placepipe, filepipe).all()) #
+                self.assertTrue(np.equal(placepipe, filepipe).all())
 
 class TestData(unittest.TestCase):
     def test_compiles(self):

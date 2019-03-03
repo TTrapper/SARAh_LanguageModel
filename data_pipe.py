@@ -77,13 +77,12 @@ def _make_pad_to_batch_fn(batch_size):
 	return (src, trg)
     return _pad_to_batch
 
-def make_inference_pipeline():
+def make_inference_pipeline(chr_to_id):
     src_place = tf.placeholder(dtype=tf.string, name='src_place')
     trg_place = tf.placeholder(dtype=tf.string, name='trg_place')
-    src = process_line(src_place)
-    src = tf.sparse.expand_dims(src, 0)
-    trg = process_line(trg_place)
-    trg = tf.sparse.expand_dims(trg, 0)
+    line_processor = _make_line_processor_fn(chr_to_id)
+    src = line_processor(src_place)
+    trg = line_processor(trg_place)
     return src_place, trg_place, src, trg
 
 def create_chr_dicts(dirname, unk_token, max_num_chrs=None):
