@@ -11,14 +11,14 @@ class Data(object):
         self.unk_token = unk_token
         (self.chr_to_freq,
          self.id_to_chr,
-         self.chr_to_id) = create_chr_dicts(self.datadir, go_stop_token, unk_token,
-                                            max_num_chrs=None)
+         self.chr_to_id) = create_chr_dicts(self.datadir, unk_token, max_num_chrs=None)
         # Build pipeline for training and eval
         self.iterator, self.filepattern = make_pipeline(batch_size, self.chr_to_id,
             cycle_length=len(os.listdir(self.datadir)))
-        src, trg = self.iterator.get_next()
+        self.src, self.trg = self.iterator.get_next()
         # Build pipeline for running inference
-        self.src_place, self.trg_place, src, trg = make_inference_pipeline(chr_to_id)
+        self.src_place, self.trg_place, self.free_src, self.free_trg = make_inference_pipeline(
+            self.chr_to_id)
 
     def initialize(self, sess, filepattern):
         sess.run(self.iterator.initializer, feed_dict={self.filepattern:filepattern})
@@ -79,8 +79,8 @@ def make_inference_pipeline(chr_to_id):
     src_place = tf.placeholder(dtype=tf.string, name='src_place')
     trg_place = tf.placeholder(dtype=tf.string, name='trg_place')
     line_processor = _make_line_processor_fn(chr_to_id)
-    src = line_processor(src_place)
-    trg = line_processor(trg_place)
+    src = tf.expand_dims(line_processor(src_place), 0)
+    trg = tf.expand_dims(line_processor(trg_place), 0)
     return src_place, trg_place, src, trg
 
 def create_chr_dicts(dirname, unk_token, max_num_chrs=None):

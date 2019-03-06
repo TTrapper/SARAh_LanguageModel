@@ -90,11 +90,20 @@ def slow_multihead_attention(values_3, keys_3, query_2, sequence_lengths_1, num_
     attended_2 = tf.reshape(attended_3, [batch_size, val_size])
     return attended_2
 
+def _get_tensorshape(tensor):
+    """
+    Returns a list. Each item is an int if the size of that dim is known, and an tf.shape op if not.
+    """
+    shape = []
+    for static_shape, shape_op in zip(tensor.shape.as_list(), tf.unstack(tf.shape(tensor))):
+        shape.append(static_shape if static_shape is not None else shape_op)
+    return shape
+
 def multihead_attention(values_3, keys_3, query_2, sequence_lengths_1, num_heads=1):
     """
     values_3: batch_size, sequence_length, value_dim
     """
-    batch_size, max_seq_len, key_size = tf.unstack(tf.shape(keys_3))
+    batch_size, max_seq_len, key_size = _get_tensorshape(keys_3)
     # split attention heads
     key_size = key_size/num_heads
     keys_4 = tf.reshape(keys_3, [batch_size, max_seq_len, num_heads, key_size])
