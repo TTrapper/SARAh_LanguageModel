@@ -6,7 +6,7 @@ import random
 import tensorflow as tf
 
 class Data(object):
-    def __init__(self, datadir, batch_size, unk_token=chr(1)):
+    def __init__(self, datadir, batch_size, unk_token=chr(1), shuffle_buffer=4096):
         self.datadir = datadir
         self.unk_token = unk_token
         (self.chr_to_freq,
@@ -14,7 +14,7 @@ class Data(object):
          self.chr_to_id) = create_chr_dicts(self.datadir, unk_token, max_num_chrs=None)
         # Build pipeline for training and eval
         self.iterator, self.filepattern = make_pipeline(batch_size, self.chr_to_id,
-            cycle_length=len(os.listdir(self.datadir)))
+            cycle_length=len(os.listdir(self.datadir)), shuffle_buffer=shuffle_buffer)
         self.src, self.trg = self.iterator.get_next()
         # Build pipeline for running inference
         self.src_place, self.trg_place, self.free_src, self.free_trg = make_inference_pipeline(
