@@ -63,6 +63,19 @@ class TestFeedForward(unittest.TestCase):
             outputs = sess.run(outputs)
             self.assertEqual(np.sum(outputs), 0.0)
 
+    def test_batch_size(self):
+        # Check that batch size doesn't affect output value (it was with TF 1.2/CUDA 9).
+        with tf.Session() as sess:
+            inputs = tf.constant(np.random.rand(8, 64), dtype=tf.float32)
+            with tf.variable_scope('batch_size_test'):
+                outputs_batched = layers.feed_forward(inputs, num_nodes=64, layer_norm=False)
+            inputs = tf.expand_dims(inputs[0], 0)
+            with tf.variable_scope('batch_size_test', reuse=True):
+                outputs_single = layers.feed_forward(inputs, num_nodes=64, layer_norm=False)
+            initialize_vars(sess)
+            outputs_batched, outputs_single = sess.run([outputs_batched, outputs_single])
+            self.assertTrue((abs([outputs_batched[0]] - outputs_single) == 0).all())
+
 class Test_MLP(unittest.TestCase):
     def test_compiles(self):
         tf.reset_default_graph()
