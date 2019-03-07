@@ -17,70 +17,79 @@ class TestModel(unittest.TestCase):
         with tf.Session() as sess:
             conf = config.get_config(keep_prob=1.0)
             data = data_pipe.Data('./example_data/', conf['batch_size'])
-#            sos_token = data.chr_to_id.lookup(tf.constant(' '))
             sos_token = 0
             model = model_def.Model(data.src, data.trg, len(data.id_to_chr), sos_token, conf)
             data.initialize(sess, data.datadir + '*')
             sess.run(tf.tables_initializer())
             sess.run(tf.global_variables_initializer())
             out_logits_3 = sess.run(model.out_logits_3)
-            print out_logits_3
-            print out_logits_3.shape
-    """
-    def test_inference_vs_train(self):
+
+    def test_batch_size(self):
+        # Test that batch_size doesn't affect output
+        # FIXME small deviance in values, TOLERANCE should be exactly 0
+        TOLERANCE = 1e-2
         tf.reset_default_graph()
         with tf.Session() as sess:
             conf = config.get_config(keep_prob=1.0)
-            conf['batch_size'] = 2
+            sos_token = 0
+            conf['batch_size'] = 8
+            data_batched = data_pipe.Data('./example_data/', conf['batch_size'], shuffle_buffer=1)
+            model = model_def.Model(data_batched.src, data_batched.trg, len(data_batched.id_to_chr), sos_token, conf)
+            out_batched = model.out_logits_3
+            tf.get_variable_scope().reuse_variables()
+            conf['batch_size'] = 1
+            data_single = data_pipe.Data('./example_data/', conf['batch_size'], shuffle_buffer=1)
+            model = model_def.Model(data_single.src, data_single.trg, len(data_single.id_to_chr), sos_token, conf)
+            out_single = model.out_logits_3
+
+            data_batched.initialize(sess, data_batched.datadir + '*')
+            data_single.initialize(sess, data_single.datadir + '*')
+            sess.run(tf.tables_initializer())
+            sess.run(tf.global_variables_initializer())
+
+            out_batched, out_single = sess.run([out_batched, out_single])
+            print "ABSOLUTE DIFF BETWEEN BATCHED OUTPUTS AND SINGLE OUTPUTS"
+            print abs(out_batched[0] - out_single[0])
+            self.assertTrue((abs(out_batched[0] - out_single[0]) <= TOLERANCE).all())
+
+
+    def test_inference_vs_train(self):
+        # Check that model outputs are identical when running inference mode
+        # FIXME small deviance in values, TOLERANCE should be exactly 0
+        TOLERANCE = 1e-3
+        tf.reset_default_graph()
+        with tf.Session() as sess:
+            conf = config.get_config(keep_prob=1.0)
+            conf['batch_size'] = 1
             data = data_pipe.Data('./example_data/', conf['batch_size'])
             model, free_model = train.build_model(data, conf)
             data.initialize(sess, data.datadir + '*')
             sess.run(tf.tables_initializer())
             sess.run(tf.global_variables_initializer())
-            (out_logits_4,
-             src_sentence_3,
-             src_sent_len_1,
-             trg_word_enc_3,
-             trg_sent_len_1,
-             trg_word_dec_3,
-             trg_word_len_2) = sess.run([model.out_logits_4,
-                                         data.src,
-                                         data.src_sentence_len,
-                                         data.trg_word_enc,
-                                         data.trg_sentence_len,
-                                         data.trg_word_dec,
-                                         data.trg_word_len])
-            src = data.array_to_strings(src_sentence_3)
-            trg = data.array_to_strings(trg_word_enc_3)
-            trg = data_pipe.replace_pad_chrs(trg[0],
-                replacements={data.go_stop_token:'', data.unk_token:''})
-            trg = trg.strip()
-            feed = {data.src_place:src[0], data.trg_place:trg}
-            free_logits_4, trg_word_enc_3 = sess.run([free_model.out_logits_4,
-                                                      data.trg_word_enc_inference], feed_dict=feed)
-            # Get the fist batch line and trim potential batch padding from the model's logits
-            out_logits_3 = out_logits_4[0, :free_logits_4.shape[1], :free_logits_4.shape[2], :]
+            (out_logits_3, src, trg) = sess.run([model.out_logits_3, data.src, data.trg])
+            src = data.array_to_strings(src)[0]
+            trg = data.array_to_strings(trg)[0]
+            feed = {data.src_place:src, data.trg_place:trg}
+            free_logits_3 = sess.run(free_model.out_logits_3, feed_dict=feed)
             # Check that the model's outputs are the same regardless of what data pipeline is used
-            self.assertTrue((np.abs(out_logits_3 - free_logits_4[0]) < 1e-4).all())
+            self.assertTrue((np.abs(out_logits_3[0] - free_logits_3) <= TOLERANCE).all())
 
             # Run the inference model as though generating one char at time, and check the outputs
-            feed = {data.src_place:src[0], data.trg_place:''} # Start with no input
-            free_logits_4, trg_word_enc_3 = sess.run([free_model.out_logits_4,
-                                                      data.trg_word_enc_inference], feed_dict=feed)
-            self.assertTrue((np.abs(free_logits_4[0,0,0,:] - out_logits_3[0,0,:]) < 1e-5).all())
-            trg = trg.split()
+            feed = {data.src_place:src, data.trg_place:''.ljust(conf['chrs_per_word'])}
+            free_logits_3 = sess.run(free_model.out_logits_3, feed_dict=feed)
+            self.assertTrue((np.abs(free_logits_3[0,0,:] - out_logits_3[0,0,:]) <= TOLERANCE).all())
+            print src
+            print trg
+            print "RUNNING INFERENCE (slowly)"
             trg_so_far = ''
-            for word_idx, trg_word in enumerate(trg):
-                for chr_num in range(len(trg_word)):
-                    trg_so_far += trg_word[chr_num]
-                    feed = {data.src_place:src[0], data.trg_place:trg_so_far}
-                    free_logits_4, trg_word_enc_3 = sess.run([free_model.out_logits_4,
-                                                              data.trg_word_enc_inference], feed_dict=feed)
-#                    print (free_logits_4[0, word_idx, chr_num + 1,:] - out_logits_3[word_idx, chr_num + 1, :]) < 1e-4
-                    self.assertTrue((np.abs(free_logits_4[0, word_idx, chr_num + 1,:] - out_logits_3[word_idx, chr_num + 1, :]) < 1e-4).all())
-                trg_so_far += ' '
-    """
-
+            for index, char in enumerate(trg):
+                trg_so_far += char
+                # Pad the trg so the chrs can be evenly divided
+                padlen = conf['chrs_per_word'] - (len(trg_so_far) % conf['chrs_per_word'])
+                padstr = ''.ljust(padlen)
+                feed = {data.src_place:src, data.trg_place:trg_so_far + padstr}
+                free_logits_3 = sess.run(free_model.out_logits_3, feed_dict=feed)
+                self.assertTrue((abs(free_logits_3[0, index, :] - out_logits_3[0, index, :]) <= TOLERANCE).all())
 
 if __name__ == '__main__':
     unittest.main()

@@ -3,7 +3,7 @@ import layers
 
 def get_config(keep_prob=0.9):
 
-    word_encoder_layers = 4*[
+    src_word_encoder = 4*[
        {'val_size':512,
         'key_size':64,
         'num_heads':1,
@@ -20,6 +20,10 @@ def get_config(keep_prob=0.9):
         'bidirectional':True}]
 
     # Decoder is same as encoder, but unidirectional
+    trg_word_encoder = [l.copy() for l in src_word_encoder]
+    for layer in trg_word_encoder:
+        layer['bidirectional'] = False
+
     sentence_decoder_layers = [l.copy() for l in sentence_encoder_layers]
     for layer in sentence_decoder_layers:
         layer['bidirectional'] = False
@@ -40,8 +44,9 @@ def get_config(keep_prob=0.9):
               'char_embed_size':32,
               'chrs_per_word':8,
               'keep_prob':keep_prob,
-              'word_encoder_layers':word_encoder_layers,
+              'src_word_encoder':src_word_encoder,
               'sentence_encoder_layers':sentence_encoder_layers,
+              'trg_word_encoder':trg_word_encoder,
               'sentence_decoder_layers':sentence_decoder_layers,
               'word_decoder_layers':word_decoder_layers}
     return config
