@@ -16,7 +16,7 @@ if not os.path.exists(args.dst):
 
 for src_doc in os.listdir(args.src):
     with open('{}/{}'.format(args.dst, src_doc), 'wb') as dst_doc, open('{}/{}'.format(args.src, src_doc), 'r') as src_doc:
-        src_doc = src_doc.read().decode('utf-8').encode('ascii', 'ignore') # TODO Loss of information on ascii encode
+        src_doc = src_doc.read().decode('utf-8').encode('ascii', 'replace') # TODO Loss of information on ascii encode
         src_doc = src_doc.replace('\n', args.newline_replacement).replace('\r', args.newline_replacement)
         # Split doc into seq_len sized chunks
         num_chars_range = '.{{{},{}}}'.format(1, args.seq_len)
