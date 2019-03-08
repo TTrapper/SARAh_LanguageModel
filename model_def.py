@@ -20,7 +20,7 @@ class Model(object):
         # Ops for generating predictions durng inference
         self.softmax_temp = tf.placeholder(self.out_logits_3.dtype, name='softmax_temp', shape=[])
         logits_2 = tf.reshape(self.out_logits_3, [-1, num_chars])
-        predictions_2 = tf.multinomial(logits_2/self.softmax_temp, num_samples=1)
+        predictions_2 = tf.random.categorical(logits_2/self.softmax_temp, num_samples=1)
         self.predictions_2 = tf.reshape(predictions_2, tf.shape(self.out_logits_3)[:-1])
 
     def build_word_encoder(self, char_ids_2, sarah_layer_specs, reuse_vars=tf.AUTO_REUSE):
