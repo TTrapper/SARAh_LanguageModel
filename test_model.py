@@ -16,7 +16,7 @@ class TestModel(unittest.TestCase):
         tf.reset_default_graph()
         with tf.Session() as sess:
             conf = config.get_config(keep_prob=1.0)
-            data = data_pipe.Data('./example_data/', conf['batch_size'])
+            data = data_pipe.Data('./example_data/processed/', conf['batch_size'])
             sos_token = 0
             model = model_def.Model(data.src, data.trg, len(data.id_to_chr), sos_token, conf)
             data.initialize(sess, data.datadir + '*')
@@ -33,12 +33,12 @@ class TestModel(unittest.TestCase):
             conf = config.get_config(keep_prob=1.0)
             sos_token = 0
             conf['batch_size'] = 8
-            data_batched = data_pipe.Data('./example_data/', conf['batch_size'], shuffle_buffer=1)
+            data_batched = data_pipe.Data('./example_data/processed/', conf['batch_size'], shuffle_buffer=1)
             model = model_def.Model(data_batched.src, data_batched.trg, len(data_batched.id_to_chr), sos_token, conf)
             out_batched = model.out_logits_3
             tf.get_variable_scope().reuse_variables()
             conf['batch_size'] = 1
-            data_single = data_pipe.Data('./example_data/', conf['batch_size'], shuffle_buffer=1)
+            data_single = data_pipe.Data('./example_data/processed/', conf['batch_size'], shuffle_buffer=1)
             model = model_def.Model(data_single.src, data_single.trg, len(data_single.id_to_chr), sos_token, conf)
             out_single = model.out_logits_3
 
@@ -61,7 +61,7 @@ class TestModel(unittest.TestCase):
         with tf.Session() as sess:
             conf = config.get_config(keep_prob=1.0)
             conf['batch_size'] = 1
-            data = data_pipe.Data('./example_data/', conf['batch_size'])
+            data = data_pipe.Data('./example_data/processed/', conf['batch_size'])
             model, free_model = train.build_model(data, conf)
             data.initialize(sess, data.datadir + '*')
             sess.run(tf.tables_initializer())

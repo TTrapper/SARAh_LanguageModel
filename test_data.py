@@ -20,7 +20,7 @@ class TestPipeline(unittest.TestCase):
     def test_compiles(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
-            datadir = './example_data/'
+            datadir = './example_data/processed/'
             batch_size = 2
             unk_token = chr(1)
             file_cycle_len = len(os.listdir(datadir))
@@ -35,7 +35,7 @@ class TestPipeline(unittest.TestCase):
     def test_trg_follows_src(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
-            datadir = './example_data/'
+            datadir = './example_data/processed/'
             batch_size = 7
             unk_token = chr(1)
             file_cycle_len = len(os.listdir(datadir))
@@ -62,7 +62,7 @@ class TestPipeline(unittest.TestCase):
     def test_inference_pipeline(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
-            datadir = './example_data/'
+            datadir = './example_data/processed/'
             src_line = 'This is a source line which should end up the same for both pipes .\n'
             trg_line = 'This is a target line which should also look the same regardless of pipe .'
             with open('./tmp_test_data', 'w') as tmp_data:
@@ -96,7 +96,7 @@ class TestData(unittest.TestCase):
             batch_size = 2
             max_word_len = 20
             max_line_len = 64
-            basedir = './example_data/'
+            basedir = './example_data/processed/'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
@@ -108,7 +108,7 @@ class TestData(unittest.TestCase):
             batch_size = 6
             max_word_len = 20
             max_line_len = 64
-            basedir = './example_data/'
+            basedir = './example_data/processed/'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
@@ -146,7 +146,7 @@ class TestData(unittest.TestCase):
             batch_size = 6
             max_word_len = 1024
             max_line_len = 1024
-            basedir = './example_data/'
+            basedir = './example_data/processed/'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
@@ -168,7 +168,7 @@ class TestData(unittest.TestCase):
             batch_size = 3
             max_word_len = 16
             max_line_len = 32
-            basedir = './example_data/'
+            basedir = './example_data/processed/'
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
