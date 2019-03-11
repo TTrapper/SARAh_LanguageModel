@@ -38,7 +38,7 @@ def make_pipeline(batch_size, chr_to_id, cycle_length, shuffle_buffer=4096):
         file_processor, sloppy=sloppy, cycle_length=cycle_length))
     pair = pair.shuffle(shuffle_buffer)
     pair = pair.batch(batch_size)
-    pair = pair.prefetch(64)
+    pair = pair.prefetch(1024)
     iterator = pair.make_initializable_iterator()
     return iterator, filepattern
 
@@ -88,7 +88,7 @@ def create_chr_dicts(dirname, unk_token, max_num_chrs=None):
     if chr_to_freq is None:
         chr_to_freq = Counter()
         for f in os.listdir(dirname):
-            chr_to_freq += Counter(open(dirname + f, 'r').read().decode('utf-8'))
+            chr_to_freq += Counter(bytes(open(dirname + f, 'r').read()))
     if unk_token in chr_to_freq:
         raise ValueError('Reserved character found in dataset:\n' + str(chr_to_freq))
     chr_to_freq = chr_to_freq.most_common(max_num_chrs)

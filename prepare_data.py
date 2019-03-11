@@ -16,11 +16,12 @@ if not os.path.exists(args.dst):
 
 for src_doc in os.listdir(args.src):
     with open('{}/{}'.format(args.dst, src_doc), 'wb') as dst_doc, open('{}/{}'.format(args.src, src_doc), 'r') as src_doc:
-        src_doc = src_doc.read().decode('utf-8').encode('ascii', 'replace') # TODO Loss of information on ascii encode
+        src_doc = src_doc.read()
         src_doc = src_doc.replace('\n', args.newline_replacement).replace('\r', args.newline_replacement)
         # Split doc into seq_len sized chunks
-        num_chars_range = '.{{{},{}}}'.format(1, args.seq_len)
-        src_doc = re.findall(num_chars_range, src_doc)
+        src_doc = bytes(src_doc)
+        src_doc = [src_doc[i:i+args.seq_len] for i in range(0, len(src_doc), args.seq_len)]
         # Pad the last string to seq_len
         src_doc[-1] = src_doc[-1].ljust(args.seq_len)
-        dst_doc.write('\n'.join(src_doc))
+        src_doc = '\n'.join(src_doc)
+        dst_doc.write(src_doc)
