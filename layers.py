@@ -133,6 +133,25 @@ def multihead_attention(values_3, keys_3, query_2, sequence_lengths_1, num_heads
     values_2 = tf.reduce_sum(values_3, axis=1)
     return values_2
 
+def gru():
+    # WIP
+    raise NotImplemented()
+    char_embeds_3 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_2)
+    self.embeds = char_embeds_3
+    # TODO: use Keras implemenation
+    gru = tf.contrib.cudnn_rnn.CudnnGRU(len(self.config['word_decoder_layers']),
+        self.config['word_decoder_layers'][0]['val_size'],
+        input_mode='auto_select',
+        direction='unidirectional',
+        dropout=1 - self.config['keep_prob'], # NOTE > 0 dropout was causing an error
+        dtype=tf.dtypes.float32)
+
+    # NOTE cudnn expects time major ?? Keras version may not
+    char_embeds_3 = tf.transpose(char_embeds_3, [1,0,2])
+    char_embeds_3 = gru.apply(char_embeds_3)[0]
+    self.grud = char_embeds_3
+    char_embeds_3 = tf.transpose(char_embeds_3, [1,0,2])
+
 def sarah_multilayer(inputs_3, seq_lens_1, layer_specs):
     """
     layer_specs: list of kwargs for each SARAh layer
@@ -154,9 +173,6 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
         external_seq_lens_1)
     input_depth = inputs_3.shape.as_list()[-1]
-    if input_depth != cell.output_size:
-        with tf.variable_scope('sarah_in_projection'):
-            inputs_3 = feed_forward(inputs_3, cell.output_size, layer_norm=True, keep_prob=keep_prob)
     if bidirectional:
         with tf.variable_scope('backward'):
             backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
@@ -177,8 +193,9 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
         external_seq_lens=None, keep_prob=1.0):
         """ """
-        self.attention_window = 32 #TODO make this configurable
         super(SelfAttentiveCell, self).__init__()
+        self.attention_window = 32 #TODO make this configurable
+        self.project_inputs = False
         self.val_size = val_size
         self.key_size = key_size
         self.mem_size = key_size + val_size
@@ -207,8 +224,10 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         if input_depth is None:
             raise ValueError("Expected inputs.shape[-1] to be known, saw shape: %s" % inputs_shape)
         if input_depth != self.output_size:
-            raise ValueError("Input size is %s but it must be the same as size of state + keys: %s"
-                % (input_depth, self.output_size))
+            self._project_w = self.add_variable('project_w', shape=[input_depth, self.output_size])
+            self._project_b = self.add_variable('project_b', shape=[self.output_size],
+                initializer=tf.zeros_initializer(dtype=self.dtype))
+            self.project_inputs = True
         kernel_in = self.val_size
         kernel_out = self.val_size + self.num_keys*self.key_size
         self._kernel = self.add_variable('weights', shape=[kernel_in, kernel_out])
@@ -217,6 +236,9 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.built = True
 
     def call(self, inputs, state):
+        if self.project_inputs:
+            inputs = tf.matmul(inputs, self._project_w)
+            inputs = tf.nn.bias_add(inputs, self._project_b)
         seq_lens, memory = state
         memory = tf.reshape(memory, [-1, self.attention_window, self.mem_size])
         query = inputs[:, self.val_size:self.val_size+self.key_size]
