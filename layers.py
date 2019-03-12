@@ -171,12 +171,12 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     external_mem_3 = [batch_size, seq_len, val_size + key_size]
     """
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
-        external_seq_lens_1)
+        external_seq_lens_1, keep_prob)
     input_depth = inputs_3.shape.as_list()[-1]
     if bidirectional:
         with tf.variable_scope('backward'):
             backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
-                external_seq_lens_1)
+                external_seq_lens_1, keep_prob)
         outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1,
             dtype=tf.get_variable_scope().dtype)
         # combine forward/backward passes
