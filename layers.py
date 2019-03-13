@@ -152,46 +152,28 @@ def gru():
     self.grud = char_embeds_3
     char_embeds_3 = tf.transpose(char_embeds_3, [1,0,2])
 
-def sarah_multilayer(inputs_3, seq_lens_1, layer_specs):
+def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs):
     """
-    layer_specs: list of kwargs for each SARAh layer
+    inputs_3: Tensor with shape: [batch_size, max_seq_len, input_depth]
+    seq_lens_1: Tensor with shape [batch_size]
+    layer_specs: list containing kwargs for one or more SelfAttentiveCell
+    bidirectional: boolean whether to create a backward_cell
     """
-    outputs_by_layer = []
-    for i, kwargs in enumerate(layer_specs):
-        with tf.variable_scope('SARAh_layer_%d' % i):
-            outputs_3 = sarah(inputs_3, seq_lens_1, **kwargs)
-            outputs_by_layer.append(outputs_3)
-            inputs_3 = outputs_3
-    return outputs_3, outputs_by_layer
-
-def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, activation_fn=None,
-        external_mem_3=None, external_seq_lens_1=None, bidirectional=False):
-    """
-    inputs_3: [batch_size, seq_len, dim]
-    external_mem_3 = [batch_size, seq_len, val_size + key_size]
-    """
-    cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
-        external_seq_lens_1, keep_prob)
-    input_depth = inputs_3.shape.as_list()[-1]
+    cells = [SelfAttentiveCell(**kwargs) for kwargs in layer_specs]
     if bidirectional:
-        with tf.variable_scope('backward'):
-            backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
-                external_seq_lens_1, keep_prob)
-        outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1,
-            dtype=tf.get_variable_scope().dtype)
-        # combine forward/backward passes
-        outputs_3 = outputs_3[0] + outputs_3[1]
+        backward_cells = [SelfAttentiveCell(**kwargs) for kwargs in layer_specs]
+        outputs_3, state_fw, state_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(cells,
+            backward_cells, inputs_3, dtype=inputs_3.dtype, sequence_length=seq_lens_1)
+        return outputs_3
     else:
-        outputs_3, _ = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1,
-            dtype=tf.get_variable_scope().dtype)
-    outputs_3 = do_layer_norm(outputs_3)
-    if activation_fn is not None:
-        outputs_3 = activation_fn(outputs_3)
-    return outputs_3
+        cell = tf.nn.rnn_cell.MultiRNNCell(cells)
+        outputs_3, state = tf.nn.dynamic_rnn(cell, inputs=inputs_3, dtype=inputs_3.dtype,
+            sequence_length=seq_lens_1)
+        return outputs_3
 
 class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
-        external_seq_lens=None, keep_prob=1.0):
+        external_seq_lens=None, keep_prob=1.0, activation_fn=gelu):
         """ """
         super(SelfAttentiveCell, self).__init__()
         self.attention_window = 32 #TODO make this configurable
@@ -203,13 +185,8 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.num_heads = num_heads
         self.keep_prob = keep_prob
         self.external_mem_array = external_mem_array
-        if external_mem_array is not None:
-            if external_mem_array.shape[-1] != val_size + key_size:
-                raise ValueError("External mem has shape %s but must have depth of internal mem: %s"
-                    % (external_mem_array.shape, val_size + key_size))
-            self.external_vals = external_mem_array[:, :, :val_size]
-            self.external_keys = external_mem_array[:, :, -key_size:]
-            self.external_seq_lens = external_seq_lens
+        self.external_seq_lens = external_seq_lens
+        self.activation_fn = activation_fn
 
     @property
     def state_size(self):
@@ -228,6 +205,11 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
             self._project_b = self.add_variable('project_b', shape=[self.output_size],
                 initializer=tf.zeros_initializer(dtype=self.dtype))
             self.project_inputs = True
+        if self.external_mem_array is not None:
+            if self.external_mem_array.shape[-1] != self.mem_size:
+                self.external_mem_array = feed_forward(self.external_mem_array, self.mem_size)
+            self.external_vals = self.external_mem_array[:, :, :self.val_size]
+            self.external_keys = self.external_mem_array[:, :, -self.key_size:]
         kernel_in = self.val_size
         kernel_out = self.val_size + self.num_keys*self.key_size
         self._kernel = self.add_variable('weights', shape=[kernel_in, kernel_out])
@@ -255,6 +237,8 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         # sequence masking during attention. This means that memory is in reverse order.
         new_mem_val = tf.expand_dims(output[:, :self.mem_size], axis=1)
         memory = tf.concat([new_mem_val, memory[:, :-1, :]], axis=1)
+        if self.activation_fn is not None:
+            output = self.activation_fn(output)
         if self.keep_prob < 1.0:
             output = tf.nn.dropout(output, keep_prob=self.keep_prob)
         return output, (seq_lens + 1, tf.reshape(memory, [-1, self.attention_window*self.mem_size]))

@@ -9,13 +9,13 @@ class Model(object):
         self.num_chars = num_chars
         # Encode source sentence
         src_sentence_3 = self.build_word_encoder(src_sentence_2, config['src_word_encoder'])
-        src_sentence_3_by_layer = self.build_sentence_encoder(src_sentence_3)
+        src_sentence_3 = self.build_sentence_encoder(src_sentence_3)
         # Add start of sequence tokens to offset the decoder's outputs from the labels
         trg_word_enc_in_2 = self.add_sos(trg_sentence_2, sos_token, config['chrs_per_word'])
         trg_word_dec_in_2 = self.add_sos(trg_sentence_2, sos_token, 1)
         # Generate target sentence word vectors by decoding source
         trg_sentence_3 = self.build_word_encoder(trg_word_enc_in_2, config['trg_word_encoder'])
-        trg_words_3 = self.build_sentence_decoder(trg_sentence_3, src_sentence_3_by_layer)
+        trg_words_3 = self.build_sentence_decoder(trg_sentence_3, src_sentence_3)
         # Generate target sentence char predictions by decoding word vectors
         self.out_logits_3 = self.build_word_decoder(trg_words_3, trg_word_dec_in_2)
         # Ops for generating predictions durng inference
@@ -29,7 +29,8 @@ class Model(object):
         with tf.variable_scope('word_encoder', reuse=reuse_vars):
             # Select char embeddings, contextualize them with RNN
             char_embeds_3 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_2)
-            char_embeds_3, _ = layers.sarah_multilayer(char_embeds_3, None, sarah_layer_specs)
+            char_embeds_3 = layers.sarah(char_embeds_3, None, bidirectional=False,
+                layer_specs=sarah_layer_specs)
             # Gather every n'th contexualized char embed, these will act as implicit word embeds.
             chrs_per_word = config['chrs_per_word']
             indices_1 = tf.range(chrs_per_word - 1, tf.shape(char_ids_2)[1], delta=chrs_per_word)
@@ -48,17 +49,17 @@ class Model(object):
 
     def build_sentence_encoder(self, word_vectors_3):
         with tf.variable_scope('sentence_encoder'):
-            _, word_vectors_3_by_layer = layers.sarah_multilayer(word_vectors_3, seq_lens_1=None,
+            word_vectors_3 = layers.sarah(word_vectors_3, seq_lens_1=None, bidirectional=True,
                 layer_specs=self.config['sentence_encoder_layers'])
-        return word_vectors_3_by_layer # num_layers * [batch, sentence_len, word_depth]
+        return word_vectors_3 # [batch, sentence_len, word_depth]
 
-    def build_sentence_decoder(self, trg_sentence_3, src_3_by_layer):
+    def build_sentence_decoder(self, trg_sentence_3, src_sentence_3):
         layer_specs = self.config['sentence_decoder_layers']
         # Add encoded src sentence to decocer spec, layer by layer
-        for spec, src_3, in zip (layer_specs, src_3_by_layer):
-            spec.update({'external_mem_3':src_3})
+        for spec in layer_specs:
+            spec.update({'external_mem_array':src_sentence_3})
         with tf.variable_scope('sentence_decoder'):
-            trg_sentence_3, _ = layers.sarah_multilayer(trg_sentence_3, seq_lens_1=None,
+            trg_sentence_3 = layers.sarah(trg_sentence_3, seq_lens_1=None, bidirectional=False,
                 layer_specs=layer_specs)
         return trg_sentence_3 # [batch, sentence_len, word_depth]
 
@@ -77,8 +78,8 @@ class Model(object):
             word_vectors_3 = tf.reshape(word_vectors_2, [tf.shape(char_ids_2)[0], -1, word_depth])
             # Combine chr embeds with their associated word context
             char_embeds_3 += word_vectors_3
-            char_embeds_3, _ = layers.sarah_multilayer(char_embeds_3, None,
-                config['word_decoder_layers'])
+            char_embeds_3  = layers.sarah(char_embeds_3, None, bidirectional=False,
+                layer_specs=config['word_decoder_layers'])
         with tf.variable_scope('logits'):
             char_logits_3 = layers.feed_forward(char_embeds_3, num_nodes=self.num_chars)
         return char_logits_3
