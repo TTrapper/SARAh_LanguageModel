@@ -19,21 +19,57 @@ def embedding(num_embeddings, embed_size, indices):
     embeddings *= mask
     return embeddings
 
-def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_prob=1.0):
+def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_prob=1.0,
+        seq_len_for_future_mask=None):
+    """
+    seq_len_for_future_mask: Used to construct a weight mask that prevents the layer from looking
+        into the future. Assumes the input is a concatenated sequence of items, such as char embeds.
+    """
     assert keep_prob >= 0.0 and keep_prob <= 1.0
     with tf.variable_scope('feed_forward'):
         weights = tf.get_variable('weights', [inputs.shape.as_list()[-1], num_nodes])
         biases = tf.get_variable('biases', [num_nodes], initializer=tf.zeros_initializer())
     indepth = tf.shape(inputs)[-1]
     outshape = tf.concat([tf.shape(inputs)[:-1], [num_nodes]], axis=0)
+    if seq_len_for_future_mask is not None:
+        weight_mask = future_mask(seq_len_for_future_mask, inputs.shape.as_list()[-1], num_nodes)
+        weights = tf.where(weight_mask, weights, tf.zeros_like(weights))
     outputs = tf.matmul(tf.reshape(inputs, [-1, indepth]), weights) + biases
     if layer_norm:
-        outputs = do_layer_norm(outputs)
+        if seq_len_for_future_mask is not None:
+            # Apply layer_norm to sequence items independently, preventing look ahead.
+            flat_shape = tf.shape(outputs)
+            seq_shape = [-1, seq_len_for_future_mask, num_nodes/seq_len_for_future_mask]
+            outputs = tf.reshape(outputs, seq_shape)
+            outputs = do_layer_norm(outputs)
+            outputs = tf.reshape(outputs, flat_shape)
+        else:
+            outputs = do_layer_norm(outputs)
     if activation_fn is not None:
         outputs = activation_fn(outputs)
     if keep_prob < 1.0:
         outputs = tf.nn.dropout(outputs, keep_prob)
     return tf.reshape(outputs, outshape)
+
+def future_mask(seq_len, in_size, out_size):
+    """
+    Create a weight mask that prevents a dense layer's parameters from looking forward. This assumes
+    that the input to the dense layer is a concatenated sequence of items, such as a list of char
+    embeddings concatenated to represent a word. An MLP built from layers masked in this way can
+    act as a sequence decoder.
+
+    seq_len: the length of the concatenated sequence represented by the input tensor.
+    in_size: the number input nodes (number of rows for the weights)
+    out_size: the number output nodes (number of columns for the weights)
+    """
+    assert in_size % seq_len == 0 and out_size % seq_len == 0
+    item_size = in_size / seq_len
+    new_item_size = int(item_size * (float(out_size)/in_size))
+    mask_lengths = range(out_size, 0, -new_item_size)
+    mask_lengths = [item_size*[l] for l in mask_lengths] # adjust mask to cover embedding size
+    mask_lengths = [item for sublist in mask_lengths for item in sublist] # flatten
+    mask = tf.reverse(tf.sequence_mask(mask_lengths), axis=[1])
+    return mask
 
 def mlp(inputs, layer_specs):
     """
@@ -142,7 +178,7 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     external_mem_3 = [batch_size, seq_len, val_size + key_size]
     """
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
-        external_seq_lens_1)
+        external_seq_lens_1, keep_prob)
     input_depth = inputs_3.shape.as_list()[-1]
     if input_depth != cell.output_size:
         with tf.variable_scope('sarah_in_projection'):
@@ -150,7 +186,7 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     if bidirectional:
         with tf.variable_scope('backward'):
             backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
-                external_seq_lens_1)
+                external_seq_lens_1, keep_prob)
         outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1,
             dtype=tf.get_variable_scope().dtype)
         # combine forward/backward passes
