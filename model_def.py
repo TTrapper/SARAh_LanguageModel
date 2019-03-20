@@ -23,14 +23,14 @@ class Model(object):
         predictions_2 = tf.multinomial(logits_2/self.softmax_temp, num_samples=1)
         self.predictions_3 = tf.reshape(predictions_2, tf.shape(self.out_logits_4)[:-1])
 
-    def create_spell_vector(self, char_embeds_4, pad=True):
+    def create_spell_vector(self, char_embeds_4, spell_vector_len, pad=True):
         config = self.config
         max_sentence_len = tf.shape(char_embeds_4)[1]
         max_word_len = tf.shape(char_embeds_4)[2]
         unpadded_vector_size = config['char_embed_size'] * max_word_len
         spell_vectors_3 = tf.reshape(char_embeds_4, [-1, max_sentence_len, unpadded_vector_size])
         if pad:
-            spell_vector_size = config['spell_vector_len'] * config['char_embed_size']
+            spell_vector_size = spell_vector_len * config['char_embed_size']
             padlen = spell_vector_size - unpadded_vector_size
             pad_tensor_3 = 0*tf.ones([tf.shape(spell_vectors_3)[0], max_sentence_len, padlen],
                 dtype=tf.get_variable_scope().dtype)
@@ -44,7 +44,7 @@ class Model(object):
         with tf.variable_scope('word_encoder', reuse=reuse_vars):
             # Select char embeddings, create fixed-len word-spelling representation
             char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
-            spell_vectors_3 = self.create_spell_vector(char_embeds_4)
+            spell_vectors_3 = self.create_spell_vector(char_embeds_4, config['spell_vector_len'])
             # Send spelling-vectors through MLP
             word_vectors_3 = layers.mlp(spell_vectors_3, config['word_encoder_mlp'])
         return word_vectors_3
@@ -63,34 +63,31 @@ class Model(object):
         with tf.variable_scope('sentence_decoder'):
             trg_sentence_3, _ = layers.sarah_multilayer(trg_sentence_3, trg_sent_lens_1,
                 layer_specs)
+            trg_sentence_3 = layers.mlp(trg_sentence_3, self.config['sentence_decoder_projection'])
         return trg_sentence_3 # [batch, sentence_len, word_size]
 
     def build_word_decoder(self, word_vectors_3, char_ids_3, word_lens_2):
         config = self.config
-#        gru = tf.keras.layers.GRU(256, return_sequences=True)
-        # Loop function operates over 1 batch element, which corresponds to a sentence/line
-        def word_rnn(args):
-            char_embeds_3, word_lens_1 = args
-            """
-            char_embeds_3: [num_words, num_chars, embed_size] char embeddings for this sentence
-            word_lens_1: [num_words] length of each word
-            word_vectors_2: [num_words, word_vec_dim] outputs from sentence decoder
-            """
-            with tf.variable_scope('word_decoder_loop'):
-#                char_vectors_3 = gru.apply(char_embeds_3)
-                char_vectors_3, _ = layers.sarah_multilayer(char_embeds_3, word_lens_1,
-                    config['word_decoder_sarah'])
-            return char_vectors_3
-        with tf.variable_scope('word_encoder', reuse=True):
-            char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
         with tf.variable_scope('word_decoder'):
-            char_vectors_4 = tf.map_fn(word_rnn, [char_embeds_4, word_lens_2],
-                dtype=tf.get_variable_scope().dtype)
-            char_vectors_4 = layers.feed_forward(char_vectors_4,
-                num_nodes=word_vectors_3.shape.as_list()[-1], activation_fn=layers.gelu,
-                keep_prob=self.config['keep_prob'])
-            char_vectors_4 += tf.expand_dims(word_vectors_3, axis=2) # broadcast and add word rep
-            char_vectors_4 = layers.mlp(char_vectors_4, config['word_decoder_mlp'])
+            spell_vector_len = config['spell_vector_len']
+            # Grab char embeds and concat them to spelling vector representations of words
+            char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
+            spell_vectors_3 = self.create_spell_vector(char_embeds_4, spell_vector_len)
+            # Create a weight_mask that prevents a dense layer from seeing future chars
+            spell_vector_size = spell_vectors_3.shape.as_list()[-1]
+            word_depth = word_vectors_3.shape.as_list()[-1]
+            # Combine spelling vector with conditioning vector using future masked mlp
+            spell_vectors_projected_3 = layers.feed_forward(spell_vectors_3, num_nodes=word_depth,
+                activation_fn=layers.gelu, keep_prob=config['keep_prob'], layer_norm=True,
+                seq_len_for_future_mask=spell_vector_len)
+            word_vectors_3 += spell_vectors_projected_3
+            word_vectors_3 = layers.mlp(word_vectors_3, config['word_decoder_mlp'])
+            # Reshape word representation into individual char representations
+            batch_size, sentence_len, word_len = tf.unstack(tf.shape(char_ids_3))
+            char_size = word_vectors_3.shape.as_list()[-1]/spell_vector_len
+            char_vectors_4 = tf.reshape(word_vectors_3, [batch_size, sentence_len, spell_vector_len, 
+                char_size])
+            char_vectors_4 = char_vectors_4[:, :, :word_len, :]
         with tf.variable_scope('logits'):
             char_logits_4 = layers.feed_forward(char_vectors_4, num_nodes=self.num_chars)
         return char_logits_4
