@@ -29,7 +29,7 @@ if not os.path.exists(args.dst):
 
 for src_doc in os.listdir(args.src):
     with open('{}/{}'.format(args.dst, src_doc), 'w') as dst_doc, open('{}/{}'.format(args.src, src_doc), 'r') as src_doc:
-        src_doc = src_doc.read().decode('utf-8').encode('ascii', 'ignore')
+        src_doc = src_doc.read()
         if args.go_stop_chr in src_doc:
             raise ValueError("The token reserved for EOS/SOS was found in the doc")
         src_doc = src_doc.replace('\n', '_-_').replace('\r', '_-_')
