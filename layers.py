@@ -178,7 +178,7 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     external_mem_3 = [batch_size, seq_len, val_size + key_size]
     """
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
-        external_seq_lens_1, keep_prob)
+        external_seq_lens_1, keep_prob, activation_fn)
     input_depth = inputs_3.shape.as_list()[-1]
     if input_depth != cell.output_size:
         with tf.variable_scope('sarah_in_projection'):
@@ -186,7 +186,7 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     if bidirectional:
         with tf.variable_scope('backward'):
             backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
-                external_seq_lens_1, keep_prob)
+                external_seq_lens_1, keep_prob, activation_fn)
         outputs_3, _ = tf.nn.bidirectional_dynamic_rnn(cell, backward_cell, inputs_3, seq_lens_1,
             dtype=tf.get_variable_scope().dtype)
         # combine forward/backward passes
@@ -194,14 +194,11 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     else:
         outputs_3, _ = tf.nn.dynamic_rnn(cell, inputs_3, seq_lens_1,
             dtype=tf.get_variable_scope().dtype)
-    outputs_3 = do_layer_norm(outputs_3)
-    if activation_fn is not None:
-        outputs_3 = activation_fn(outputs_3)
     return outputs_3
 
 class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
-        external_seq_lens=None, keep_prob=1.0):
+        external_seq_lens=None, keep_prob=1.0, activation_fn=None):
         """ """
         super(SelfAttentiveCell, self).__init__()
         self.val_size = val_size
@@ -210,6 +207,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.num_keys = 1 if external_mem_array is None else 2
         self.num_heads = num_heads
         self.keep_prob = keep_prob
+        self.activation_fn = activation_fn
         self.memory = tf.TensorArray(tf.get_variable_scope().dtype, 0, dynamic_size=True,
             clear_after_read=False, element_shape=[None, self.val_size+self.key_size], name='memTA')
         self.external_mem_array = external_mem_array
@@ -261,10 +259,11 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         if self.external_mem_array is not None:
             query = inputs[:, -self.key_size:] # not the same query used for internal mem
             context += self._attend_to_external(query)
-        value = do_layer_norm(value + context)
-        output = tf.matmul(value, self._kernel)
+        output = tf.matmul(value + context, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
         output = do_layer_norm(output)
+        if self.activation_fn is not None:
+            output = self.activation_fn(output)
         if self.keep_prob < 1.0:
             output = tf.nn.dropout(output, keep_prob=self.keep_prob)
         return output, (seq_lens + 1, output[:, :self.mem_size])
