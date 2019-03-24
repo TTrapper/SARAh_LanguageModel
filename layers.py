@@ -179,10 +179,6 @@ def sarah(inputs_3, seq_lens_1, val_size, key_size, num_heads, keep_prob=1.0, ac
     """
     cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
         external_seq_lens_1, keep_prob, activation_fn)
-    input_depth = inputs_3.shape.as_list()[-1]
-    if input_depth != cell.output_size:
-        with tf.variable_scope('sarah_in_projection'):
-            inputs_3 = feed_forward(inputs_3, cell.output_size, layer_norm=True, keep_prob=keep_prob)
     if bidirectional:
         with tf.variable_scope('backward'):
             backward_cell = SelfAttentiveCell(val_size, key_size, num_heads, external_mem_3,
@@ -209,6 +205,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.num_heads = num_heads
         self.keep_prob = keep_prob
         self.activation_fn = activation_fn
+        self.project_inputs = False
         self.external_mem_array = external_mem_array
         if external_mem_array is not None:
             if external_mem_array.shape[-1] != val_size + key_size:
@@ -231,8 +228,9 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         if input_depth is None:
             raise ValueError("Expected inputs.shape[-1] to be known, saw shape: %s" % inputs_shape)
         if input_depth != self.output_size:
-            raise ValueError("Input size is %s but it must be the same as size of state + keys: %s"
-                % (input_depth, self.output_size))
+            self.project_w = self.add_variable('project_w', shape=[input_depth, self.output_size])
+            self.project_b = self.add_variable('project_b', shape=[self.output_size])
+            self.project_inputs = True
         kernel_in = self.val_size
         kernel_out = self.val_size + self.num_keys*self.key_size
         self._kernel = self.add_variable('weights', shape=[kernel_in, kernel_out])
@@ -241,6 +239,8 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.built = True
 
     def call(self, inputs, state):
+        if self.project_inputs:
+            inputs = tf.nn.bias_add(tf.matmul(inputs, self.project_w), self.project_b)
         seq_lens, memory = state
         memory = tf.reshape(memory, [-1, self.attention_window, self.mem_size])
         query = inputs[:, self.val_size:self.val_size+self.key_size]
