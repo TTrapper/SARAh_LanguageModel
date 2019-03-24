@@ -200,6 +200,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
         external_seq_lens=None, keep_prob=1.0, activation_fn=None):
         """ """
+        self.attention_window = 16 #TODO make this configurable
         super(SelfAttentiveCell, self).__init__()
         self.val_size = val_size
         self.key_size = key_size
@@ -208,8 +209,6 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.num_heads = num_heads
         self.keep_prob = keep_prob
         self.activation_fn = activation_fn
-        self.memory = tf.TensorArray(tf.get_variable_scope().dtype, 0, dynamic_size=True,
-            clear_after_read=False, element_shape=[None, self.val_size+self.key_size], name='memTA')
         self.external_mem_array = external_mem_array
         if external_mem_array is not None:
             if external_mem_array.shape[-1] != val_size + key_size:
@@ -221,7 +220,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
 
     @property
     def state_size(self):
-        return (1, self.mem_size)
+        return (1, self.mem_size * self.attention_window)
 
     @property
     def output_size(self):
@@ -242,20 +241,11 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.built = True
 
     def call(self, inputs, state):
-        # There is one time counter per batch element. If the cell is unrolled with sequence_length
-        # parameter, the time counter will stop at the provided sequence_length for each sequence
-        # in the batch. We take the max here to always write to a new index of the memory array.
-        # FIXME: if the longest sequence length specified is shorter than the number of elements
-        # in the input tensor, then this will fail since the time counter will get stuck at that
-        # specified sequence_length. What is wrong with using self.memory.size() ?
-        seq_lens, new_mem_val = state
-        time = tf.to_int32(tf.reduce_max(seq_lens))
+        seq_lens, memory = state
+        memory = tf.reshape(memory, [-1, self.attention_window, self.mem_size])
         query = inputs[:, self.val_size:self.val_size+self.key_size]
         value = inputs[:, :self.val_size]
-        # Memory is empty for the first timestep, otherwise apply attention to it
-        context = tf.cond(tf.equal(time, 0),
-            lambda: tf.zeros_like(value),
-            lambda: self._attend_to_memory(time, new_mem_val, query, seq_lens))
+        context = self._attend_to_memory(memory, query, seq_lens)
         if self.external_mem_array is not None:
             query = inputs[:, -self.key_size:] # not the same query used for internal mem
             context += self._attend_to_external(query)
@@ -264,15 +254,17 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         output = do_layer_norm(output)
         if self.activation_fn is not None:
             output = self.activation_fn(output)
+        # Extract new mem val and add it to memory. Values are added to the beggining to align with
+        # sequence masking during attention. This means that memory is in reverse order.
+        new_mem_val = tf.expand_dims(output[:, :self.mem_size], axis=1)
+        memory = tf.concat([new_mem_val, memory[:, :-1, :]], axis=1)
         if self.keep_prob < 1.0:
             output = tf.nn.dropout(output, keep_prob=self.keep_prob)
-        return output, (seq_lens + 1, output[:, :self.mem_size])
+        return output, (seq_lens + 1, tf.reshape(memory, [-1, self.attention_window*self.mem_size]))
 
-    def _attend_to_memory(self, time, new_mem_val, query, seq_lens):
+    def _attend_to_memory(self, memory_3, query, seq_lens):
         seq_lens = tf.squeeze(seq_lens, axis=1)
-        self.memory = self.memory.write(time, new_mem_val)
-        memory_3 = self.memory.stack() # [seq, batch, depth]
-        memory_3 = tf.transpose(memory_3, [1, 0, 2]) # [batch, seq, depth]
+        seq_lens = tf.math.minimum(seq_lens, self.attention_window)
         values = memory_3[:, :, :self.val_size]
         keys = memory_3[:, :, -self.key_size:]
         return multihead_attention(values, keys, query, seq_lens, self.num_heads)
