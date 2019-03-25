@@ -51,18 +51,17 @@ class Model(object):
 
     def build_sentence_encoder(self, word_vectors_3, sentence_lens_1):
         with tf.variable_scope('sentence_encoder'):
-            _, word_vectors_3_by_layer = layers.sarah_multilayer(word_vectors_3, sentence_lens_1,
+            word_vectors_3 = layers.sarah(word_vectors_3, sentence_lens_1, False,
                 self.config['sentence_encoder_layers'])
-        return word_vectors_3_by_layer # num_layers * [batch, sentence_len, word_size]
+        return word_vectors_3 # [batch, sentence_len, word_size]
 
-    def build_sentence_decoder(self, trg_sentence_3, trg_sent_lens_1, src_3_by_layer,
+    def build_sentence_decoder(self, trg_sentence_3, trg_sent_lens_1, src_sentence_3,
         src_sent_lens_1):
         layer_specs = self.config['sentence_decoder_layers']
-        for spec, src_3, in zip (layer_specs, src_3_by_layer):
-            spec.update({'external_mem_3':src_3, 'external_seq_lens_1':src_sent_lens_1})
+        for spec in layer_specs:
+            spec.update({'external_mem_array':src_sentence_3, 'external_seq_lens':src_sent_lens_1})
         with tf.variable_scope('sentence_decoder'):
-            trg_sentence_3, _ = layers.sarah_multilayer(trg_sentence_3, trg_sent_lens_1,
-                layer_specs)
+            trg_sentence_3 = layers.sarah(trg_sentence_3, trg_sent_lens_1, False, layer_specs)
             trg_sentence_3 = layers.mlp(trg_sentence_3, self.config['sentence_decoder_projection'])
         return trg_sentence_3 # [batch, sentence_len, word_size]
 

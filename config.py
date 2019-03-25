@@ -16,13 +16,10 @@ def generate_config(keep_prob=0.9):
         'key_size':128,
         'num_heads':8,
         'keep_prob':keep_prob,
-        'activation_fn':layers.gelu,
-        'bidirectional':False}]
+        'activation_fn':layers.gelu}]
 
-    # Decoder is same as encoder, but unidirectional
+    # Decoder is same as encoder
     sentence_decoder_layers = [l.copy() for l in sentence_encoder_layers]
-    for layer in sentence_decoder_layers:
-        layer['bidirectional'] = False
 
     word_decoder_size = 2*spell_vector_len*char_embed_size
     # project out word embeddings to same size as word_decoder layers
@@ -40,7 +37,7 @@ def generate_config(keep_prob=0.9):
         'seq_len_for_future_mask':spell_vector_len}]
 
     config = {
-              'max_grad_norm':1,
+              'max_grad_norm':5,
               'learn_rate':1e-4,
               'batch_size':32,
               'char_embed_size':char_embed_size,
