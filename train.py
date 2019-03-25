@@ -10,6 +10,10 @@ import data_pipe
 import model_def
 import config
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--datadir', type=str, required=True)
+parser.add_argument('--restore', type=str, default=None)
+parser.add_argument('--keep_prob', type=float, default=0.9)
 
 def build_model(data, conf, reuse=False):
     with tf.variable_scope('Model', dtype=tf.float32, reuse=reuse) as scope:
@@ -32,6 +36,8 @@ def build_model(data, conf, reuse=False):
             data.trg_word_len_inference,
             len(data.chr_to_freq),
             conf)
+    for v in tf.trainable_variables():
+        print v
     return model, free_model
 
 def calc_loss(logits, targets, word_lens, sentence_lens):
@@ -86,7 +92,7 @@ def run_inference(model, data, conf, sess, softmax_temp=1e-24):
         print result
 
 def train():
-    conf = config.generate_config()
+    conf = config.generate_config(args.keep_prob)
     data = data_pipe.Data(args.datadir, conf['batch_size'], conf['max_word_len'], conf['max_line_len'])
     model, free_model = build_model(data, conf)
     loss = calc_loss(model.out_logits_4, data.trg, data.trg_word_len, data.trg_sentence_len)
@@ -95,6 +101,8 @@ def train():
     saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=1)
     sess.run(tf.tables_initializer())
     sess.run(tf.global_variables_initializer())
+    if args.restore is not None:
+        saver.restore(sess, args.restore)
     data.initialize(sess, data.datadir + '*')
     recent_costs = deque(maxlen=100)
     batch_num = 0
@@ -103,14 +111,12 @@ def train():
         recent_costs.append(c)
         if batch_num%250 == 0:
             print batch_num, sum(recent_costs)/len(recent_costs), n
-            saver.save(sess, './saves/model.ckpt')
             run_inference(free_model, data, conf, sess)
+            saver.save(sess, './saves/model.ckpt')
             sys.stdout.flush()
         batch_num += 1
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--datadir', type=str, required=True)
     args = parser.parse_args()
     train()
