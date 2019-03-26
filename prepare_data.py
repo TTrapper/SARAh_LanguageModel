@@ -32,7 +32,7 @@ for src_doc in os.listdir(args.src):
         src_doc = src_doc.read()
         if args.go_stop_chr in src_doc:
             raise ValueError("The token reserved for EOS/SOS was found in the doc")
-        src_doc = src_doc.replace('\n', '_-_').replace('\r', '_-_')
+        src_doc = src_doc.replace('\n', ' _-_ ').replace('\r', ' _-_ ')
         src_doc = parse_by_alpha(src_doc)
         src_doc = [' '.join(src_doc[i:i + args.seq_len]) for i in xrange(0, len(src_doc), args.seq_len)]
         dst_doc.write('\n'.join(src_doc))
