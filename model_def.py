@@ -4,24 +4,37 @@ import layers
 import data_pipe
 
 class Model(object):
-    def __init__(self, src_sentence_3, src_sent_len_1, trg_word_enc_3, trg_sent_len_1, trg_word_dec_3,
-        trg_word_len_2, num_chars, config):
+    def __init__(self, src_sentence_3, src_sent_len_1, trg_sentence_3, trg_sent_len_1, num_chars,
+        config):
         self.config = config
         self.num_chars = num_chars
         # Encode source sentence
         src_sentence_3 = self.build_word_encoder(src_sentence_3)
-        src_sentence_3_by_layer = self.build_sentence_encoder(src_sentence_3, src_sent_len_1)
-        # Generate target sentence word vectors by decoding source
-        trg_word_enc_3 = self.build_word_encoder(trg_word_enc_3, reuse_vars=True)
-        trg_word_enc_3 = self.build_sentence_decoder(trg_word_enc_3, trg_sent_len_1,
-            src_sentence_3_by_layer, src_sent_len_1)
+        src_sentence_3 = self.build_sentence_encoder(src_sentence_3, src_sent_len_1)
+        # Encode target sentence, conditioned on source
+        trg_sentence_encoded_3 = self.add_go(trg_sentence_3, axis=1)
+        trg_sentence_encoded_3 = self.build_word_encoder(trg_sentence_encoded_3, reuse_vars=True)
+        trg_sentence_encoded_3 = self.build_sentence_decoder(trg_sentence_encoded_3, trg_sent_len_1,
+            src_sentence_3, src_sent_len_1)
         # Generate target sentence char predictions by decoding word vectors
-        self.out_logits_4 = self.build_word_decoder(trg_word_enc_3, trg_word_dec_3, trg_word_len_2)
+        self.out_logits_4 = self.build_word_decoder(trg_sentence_encoded_3, trg_sentence_3)
         # Ops for generating predictions durng inference
         self.softmax_temp = tf.placeholder(self.out_logits_4.dtype, name='softmax_temp', shape=[])
         logits_2 = tf.reshape(self.out_logits_4, [-1, num_chars])
         predictions_2 = tf.multinomial(logits_2/self.softmax_temp, num_samples=1)
         self.predictions_3 = tf.reshape(predictions_2, tf.shape(self.out_logits_4)[:-1])
+
+    def add_go(self, char_ids_3, axis):
+        assert axis == 1 or axis == 2
+        if axis == 1: # GO word
+            # Pad from a single char to keep consistent regargless of max word lens in the batch
+            padding = -1*tf.ones_like(char_ids_3[:, 0, :-1])
+            go = tf.zeros_like(char_ids_3[:, 0, 0])
+            go = tf.concat([tf.expand_dims(go, axis=1), padding], axis=1)
+        else : # GO char
+            go = tf.zeros_like(char_ids_3[:, :, 0]) # extends beyond sentence_lens but that OK
+        char_ids_3 = tf.concat([tf.expand_dims(go, axis=axis), char_ids_3], axis=axis)
+        return char_ids_3[:, :-1, :] if axis == 1 else char_ids_3[:, :, :-1]
 
     def create_spell_vector(self, char_embeds_4, spell_vector_len, pad=True):
         config = self.config
@@ -65,11 +78,12 @@ class Model(object):
             trg_sentence_3 = layers.mlp(trg_sentence_3, self.config['sentence_decoder_projection'])
         return trg_sentence_3 # [batch, sentence_len, word_size]
 
-    def build_word_decoder(self, word_vectors_3, char_ids_3, word_lens_2):
+    def build_word_decoder(self, word_vectors_3, char_ids_3):
         config = self.config
         with tf.variable_scope('word_decoder'):
             spell_vector_len = config['spell_vector_len']
             # Grab char embeds and concat them to spelling vector representations of words
+            char_ids_3 = self.add_go(char_ids_3, axis=2)
             char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
             spell_vectors_3 = self.create_spell_vector(char_embeds_4, spell_vector_len)
             # Create a weight_mask that prevents a dense layer from seeing future chars
@@ -84,7 +98,7 @@ class Model(object):
             # Reshape word representation into individual char representations
             batch_size, sentence_len, word_len = tf.unstack(tf.shape(char_ids_3))
             char_size = word_vectors_3.shape.as_list()[-1]/spell_vector_len
-            char_vectors_4 = tf.reshape(word_vectors_3, [batch_size, sentence_len, spell_vector_len, 
+            char_vectors_4 = tf.reshape(word_vectors_3, [batch_size, sentence_len, spell_vector_len,
                 char_size])
             char_vectors_4 = char_vectors_4[:, :, :word_len, :]
         with tf.variable_scope('logits'):

@@ -19,10 +19,8 @@ def build_model(data, conf, reuse=False):
     with tf.variable_scope('Model', dtype=tf.float32, reuse=reuse) as scope:
         model = model_def.Model(data.src,
             data.src_sentence_len,
-            data.trg_word_enc,
+            data.trg,
             data.trg_sentence_len,
-            data.trg_word_dec,
-            data.trg_word_len,
             len(data.chr_to_freq),
             conf)
         scope.reuse_variables()
@@ -30,10 +28,8 @@ def build_model(data, conf, reuse=False):
         conf = config.generate_config(1.0)
         free_model = model_def.Model(data.src_inference,
             data.src_sentence_len_inference,
-            data.trg_word_enc_inference,
+            data.trg_inference,
             data.trg_sentence_len_inference,
-            data.trg_word_dec_inference,
-            data.trg_word_len_inference,
             len(data.chr_to_freq),
             conf)
     for v in tf.trainable_variables():

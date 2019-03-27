@@ -20,21 +20,17 @@ class Data(object):
             cycle_length=len(os.listdir(self.datadir)))
         src, trg = self.iterator.get_next()
         (self.src,
-         self.trg_word_enc,
-         self.trg_word_dec,
          self.trg,
          self.src_sentence_len,
-         self.trg_word_len,
-         self.trg_sentence_len) = sparse_chr_to_dense_id(self.chr_to_id, src, trg)
+         self.trg_sentence_len,
+         self.trg_word_len) = sparse_chr_to_dense_id(self.chr_to_id, src, trg)
         # Build pipeline for running inference
         self.src_place, self.trg_place, src, trg = make_inference_pipeline()
         (self.src_inference,
-         self.trg_word_enc_inference,
-         self.trg_word_dec_inference,
-         _,
+         self.trg_inference,
          self.src_sentence_len_inference,
-         self.trg_word_len_inference,
-         self.trg_sentence_len_inference) = sparse_chr_to_dense_id(self.chr_to_id, src, trg)
+         self.trg_sentence_len_inference,
+         _) = sparse_chr_to_dense_id(self.chr_to_id, src, trg)
 
     def initialize(self, sess, filepattern):
         sess.run(self.iterator.initializer, feed_dict={self.filepattern:filepattern})
@@ -61,27 +57,22 @@ def make_pipeline(batch_size, max_word_len, max_line_len, cycle_length=128, shuf
 def _make_file_processor_fn(max_word_len, max_line_len):
     def examples_from_file(filename):
         lines = tf.data.TextLineDataset(filename)
-        src = lines.map(_make_line_processor_fn())
-        src = src.map(lambda line: sparse_trim(line, max_line_len, max_word_len))
+        src = lines.map(_process_line)
+        # TODO: src should be trimmed from the beginning, trg from the end
+        src = src.map(lambda line: sparse_trim(line, max_line_len + 1, max_word_len + 1))
         trg = lines.skip(1)
-        trg = trg.map(_make_line_processor_fn(is_trg=True))
-        # target lines and words are trimmed taking into account the added go/stop tokens.
-        # note that the stop tokens will be trimmed from long sequences.
-        trg = trg.map(lambda line: sparse_trim(line, max_line_len + 2, max_word_len + 2))
+        trg = trg.map(_process_line)
+        trg = trg.map(lambda line: sparse_trim(line, max_line_len + 1, max_word_len + 1))
         pair = tf.data.Dataset.zip((src, trg))
         return pair
     return examples_from_file
 
-def _make_line_processor_fn(is_trg=False):
-    def process_line(line):
-        line = _split_words(line)
-        max_line_len = 0
-        if is_trg:
-            line = _add_go_stop_words(line)
-            line = _add_go_stop_chars(line)
-        line = _split_chars(line)
-        return line
-    return process_line
+def _process_line(line):
+    line = _split_words(line)
+    line = _add_stop_words(line)
+    line = _add_stop_chars(line)
+    line = _split_chars(line)
+    return line
 
 def _split_words(line):
     line = tf.expand_dims(line, axis=0)
@@ -100,13 +91,12 @@ def _split_chars(line):
     _, line = tf.while_loop(condition, body, loop_vars=[i0, firstWord], back_prop=False)
     return line
 
-def _add_go_stop_words(line):
-    GO = tf.SparseTensor(indices=[[0,0]], values=[chr(0)], dense_shape=[1,1])
-    STOP = GO
-    return tf.sparse_concat(axis=1, sp_inputs=[GO, line, STOP])
+def _add_stop_words(line):
+    STOP = tf.SparseTensor(indices=[[0,0]], values=[chr(0)], dense_shape=[1,1])
+    return tf.sparse_concat(axis=1, sp_inputs=[line, STOP])
 
-def _add_go_stop_chars(line):
-    values = tf.map_fn(lambda x:tf.string_join([chr(0), x, chr(0)]), line.values, back_prop=False)
+def _add_stop_chars(line):
+    values = tf.map_fn(lambda x:tf.string_join([x, chr(0)]), line.values, back_prop=False)
     line = tf.SparseTensor(line.indices, values, line.dense_shape)
     return line
 
@@ -122,11 +112,9 @@ def _make_pad_to_batch_fn(batch_size):
 def make_inference_pipeline():
     src_place = tf.placeholder(dtype=tf.string, name='src_place')
     trg_place = tf.placeholder(dtype=tf.string, name='trg_place')
-    process_src = _make_line_processor_fn()
-    src = process_src(src_place)
+    src = _process_line(src_place)
     src = tf.sparse.expand_dims(src, 0)
-    process_trg =_make_line_processor_fn(is_trg=True)
-    trg = process_trg(trg_place)
+    trg = _process_line(trg_place)
     trg = tf.sparse.expand_dims(trg, 0)
     return src_place, trg_place, src, trg
 
@@ -156,23 +144,10 @@ def sparse_chr_to_dense_id(chr_to_id, src, trg):
     # Decoder has different representations a different levels
     trg = chr_to_id.lookup(trg)
     trg = tf.sparse_tensor_to_dense(trg, default_value=-1)
-    # Input to word encoder of the target sentence decoder
-    trg_word_enc = trg[:, :-1, 1:] # remove STOP word, GO chr
-    # Input to word decoder of the target sentence Decoder
-    trg_word_dec = trg[:, 1:, :-1] # remove GO word, STOP chr
-    # Targets
-    targets = trg[:, 1:, 1:] # remove GO word, GO chr
-    # Sequence lengths
     src_sentence_len = get_sentence_lens(src)
-    trg_word_len = get_word_lens(targets)
-    trg_sentence_len = get_sentence_lens(trg_word_dec, trg_word_len)
-    return (src,
-            trg_word_enc,
-            trg_word_dec,
-            targets,
-            src_sentence_len,
-            trg_word_len,
-            trg_sentence_len)
+    trg_word_len = get_word_lens(trg)
+    trg_sentence_len = get_sentence_lens(trg, trg_word_len)
+    return src, trg, src_sentence_len, trg_sentence_len, trg_word_len
 
 #### UTILITIES ####
 
