@@ -11,15 +11,12 @@ def generate_config(keep_prob=0.9):
         'layer_norm':True,
         'keep_prob':keep_prob}]
 
-    sentence_encoder_layers = 8*[
+    sentence_encoder_layers = 6*[
        {'val_size':512,
         'key_size':128,
         'num_heads':8,
         'keep_prob':keep_prob,
         'activation_fn':layers.gelu}]
-
-    # Decoder is same as encoder
-    sentence_decoder_layers = [l.copy() for l in sentence_encoder_layers]
 
     word_decoder_size = 2*spell_vector_len*char_embed_size
     # project out word embeddings to same size as word_decoder layers
@@ -47,7 +44,6 @@ def generate_config(keep_prob=0.9):
               'keep_prob':keep_prob,
               'word_encoder_mlp':word_encoder_mlp,
               'sentence_encoder_layers':sentence_encoder_layers,
-              'sentence_decoder_layers':sentence_decoder_layers,
               'sentence_decoder_projection':sentence_decoder_projection,
               'word_decoder_mlp':word_decoder_mlp}
     return config
