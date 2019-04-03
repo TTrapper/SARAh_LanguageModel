@@ -37,6 +37,8 @@ def build_model(data, conf, reuse=False):
     return model, free_model
 
 def calc_loss(logits, targets, word_lens, sentence_lens):
+    word_lens = word_lens.to_tensor(0)
+    targets = targets.to_tensor(-1)
     mask = tf.where(tf.equal(targets, -1), tf.zeros_like(targets), tf.ones_like(targets))
     targets *= mask # softmax doesn't like oov targets, turn -1 padding to 0
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets)

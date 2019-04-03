@@ -17,20 +17,24 @@ class Data(object):
                                             max_num_chrs=None)
         # Build pipeline for training and eval
         self.iterator, self.filepattern = make_pipeline(batch_size, max_word_len, max_line_len,
-            cycle_length=len(os.listdir(self.datadir)))
-        src, trg = self.iterator.get_next()
+            self.chr_to_id, cycle_length=len(os.listdir(self.datadir)))
+        (src_vals, src_row_lens), (trg_vals, trg_row_lens) = self.iterator.get_next()
+        sess = tf.Session()
+        sess.run(self.iterator.initializer, feed_dict={self.filepattern:'./example_data/*'})
+        sess.run(tf.tables_initializer())
         (self.src,
-         self.trg,
          self.src_sentence_len,
+         self.src_word_len) = _compose_ragged_batch(src_vals, src_row_lens)
+        (self.trg,
          self.trg_sentence_len,
-         self.trg_word_len) = sparse_chr_to_dense_id(self.chr_to_id, src, trg)
+         self.trg_word_len) = _compose_ragged_batch(trg_vals, trg_row_lens)
         # Build pipeline for running inference
-        self.src_place, self.trg_place, src, trg = make_inference_pipeline()
-        (self.src_inference,
-         self.trg_inference,
-         self.src_sentence_len_inference,
-         self.trg_sentence_len_inference,
-         _) = sparse_chr_to_dense_id(self.chr_to_id, src, trg)
+        self.src_place, self.trg_place, src, trg = make_inference_pipeline(self.chr_to_id)
+        (src_vals, src_row_lens), (trg_vals, trg_row_lens) = (src, trg)
+        (self.src_inference, self.src_sentence_len_inference, _) = _compose_ragged_batch(
+            src_vals, src_row_lens)
+        (self.trg_inference, self.trg_sentence_len_inference, _) = _compose_ragged_batch(
+            trg_vals, trg_row_lens)
 
     def initialize(self, sess, filepattern):
         sess.run(self.iterator.initializer, feed_dict={self.filepattern:filepattern})
@@ -39,18 +43,24 @@ class Data(object):
         return [' '.join([''.join([self.id_to_chr[c] for c in word if c != -1])
             for word in sentence]) for sentence in array_3]
 
-def make_pipeline(batch_size, max_word_len, max_line_len, cycle_length=128, shuffle_buffer=4096):
+
+
+def make_pipeline(batch_size, max_word_len, max_line_len, chr_to_id, cycle_length=128,
+    shuffle_buffer=4096):
     do_shuffle = shuffle_buffer > 1
     sloppy = do_shuffle
     filepattern = tf.placeholder(dtype=tf.string, name='filepattern')
     numfiles = tf.placeholder(dtype=tf.int64, name='numfiles')
+    # TODO try tf.data.experimental.shuffle_and_repeat(
     filepaths = tf.data.Dataset.list_files(filepattern, shuffle=do_shuffle).repeat()
     file_processor = _make_file_processor_fn(max_word_len, max_line_len)
-    pair = filepaths.apply(tf.contrib.data.parallel_interleave(
+    pair = filepaths.apply(tf.contrib.data.parallel_interleave(# TODO try tf.data.experimental.sample_from_datasets
         file_processor, sloppy=sloppy, cycle_length=cycle_length))
     pair = pair.shuffle(shuffle_buffer)
-    pair = pair.batch(batch_size)
-    pair = pair.prefetch(64)
+    pair = pair.batch(batch_size) # NOTE: expands non-concat dim. Complicates sparse_batch_to_ragged
+    pair = pair.map(lambda *batches: tuple([chr_to_id.lookup(b) for b in batches]))
+    pair = pair.map(lambda *batches: tuple([_sparse_batch_to_ragged(b, batch_size) for b in batches]))
+    pair = pair.prefetch(64) # TODO: try tf.data.experimental.prefetch_to_device
     iterator = pair.make_initializable_iterator()
     return iterator, filepattern
 
@@ -100,22 +110,35 @@ def _add_stop_chars(line):
     line = tf.SparseTensor(line.indices, values, line.dense_shape)
     return line
 
-def _make_pad_to_batch_fn(batch_size):
-    def _pad_to_batch(*src_trg_batch):
-	pad = lambda b: tf.SparseTensor(b.indices, b.values,
-	    b.dense_shape + [batch_size - b.dense_shape[0], 0, 0])
-	src = pad(src_trg_batch[0])
-	trg = pad(src_trg_batch[1])
-	return (src, trg)
-    return _pad_to_batch
+def _sparse_batch_to_ragged(batch, batch_size):
+    batch = tf.sparse.to_dense(batch, default_value=-1)
+    sentence_lens_1 = get_sentence_lens(batch)
+    sentence_lens_1 = tf.unstack(sentence_lens_1, num=batch_size, axis=0)
+    batch = tf.unstack(batch, num=batch_size, axis=0)
+    # Sentences are by tf.Dataset.map. Trim them here to prevent empty rows in the RaggedTensor
+    batch = [b[:l, :] for b,l in zip(batch, sentence_lens_1)]
+    batch = [tf.RaggedTensor.from_tensor(b, padding=-1) for b in batch]
+    batch = tf.stack(batch, axis=0)
+    # Return RaggedTensor decomposed as vals and row lengths for compatibility with tf.Dataset.map
+    return (batch.flat_values, batch.nested_row_lengths())
 
-def make_inference_pipeline():
+def _compose_ragged_batch(flat_values, nested_row_lengths):
+    rag = tf.RaggedTensor.from_nested_row_lengths(flat_values, nested_row_lengths)
+    rag_sentence_len = nested_row_lengths[0]
+    rag_word_len = tf.RaggedTensor.from_row_lengths(nested_row_lengths[1], nested_row_lengths[0])
+    return rag, rag_sentence_len, rag_word_len
+
+def make_inference_pipeline(chr_to_id):
     src_place = tf.placeholder(dtype=tf.string, name='src_place')
     trg_place = tf.placeholder(dtype=tf.string, name='trg_place')
     src = _process_line(src_place)
     src = tf.sparse.expand_dims(src, 0)
+    src = chr_to_id.lookup(src)
+    src = _sparse_batch_to_ragged(src, 1)
     trg = _process_line(trg_place)
     trg = tf.sparse.expand_dims(trg, 0)
+    trg = chr_to_id.lookup(trg)
+    trg = _sparse_batch_to_ragged(trg, 1)
     return src_place, trg_place, src, trg
 
 def create_chr_dicts(dirname, go_stop_token, unk_token, max_num_chrs=None):
@@ -136,18 +159,6 @@ def create_chr_dicts(dirname, go_stop_token, unk_token, max_num_chrs=None):
     chr_to_id = tf.contrib.lookup.index_table_from_tensor(
         id_to_chr, default_value=id_to_chr.index(unk_token))
     return chr_to_freq, id_to_chr, chr_to_id
-
-def sparse_chr_to_dense_id(chr_to_id, src, trg):
-    # Input to encoder
-    src = chr_to_id.lookup(src)
-    src = tf.sparse_tensor_to_dense(src, default_value=-1)
-    # Decoder has different representations a different levels
-    trg = chr_to_id.lookup(trg)
-    trg = tf.sparse_tensor_to_dense(trg, default_value=-1)
-    src_sentence_len = get_sentence_lens(src)
-    trg_word_len = get_word_lens(trg)
-    trg_sentence_len = get_sentence_lens(trg, trg_word_len)
-    return src, trg, src_sentence_len, trg_sentence_len, trg_word_len
 
 #### UTILITIES ####
 

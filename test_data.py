@@ -8,14 +8,20 @@ import prepare_data
 import data_pipe
 
 class TestPipeline(unittest.TestCase):
+    def setup_char_to_id(self, sess):
+        _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/', chr(0), chr(1))
+        sess.run(tf.tables_initializer())
+        return chr_to_id
+
     def test_compiles(self):
         tf.reset_default_graph()
         with tf.Session() as sess:
             batch_size = 2
             max_word_len = 20
             max_line_len = 64
+            chr_to_id = self.setup_char_to_id(sess)
             iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
-                shuffle_buffer=16)
+                chr_to_id, shuffle_buffer=16)
             sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
             src_op, trg_op = iterator.get_next()
             src, trg = sess.run([src_op, trg_op])
@@ -26,11 +32,14 @@ class TestPipeline(unittest.TestCase):
             batch_size = 2
             max_word_len = 4
             max_line_len = 1024
+            chr_to_id = self.setup_char_to_id(sess)
             iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
-                shuffle_buffer=16)
+                chr_to_id, shuffle_buffer=16)
             sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
-            src_op, trg_op = iterator.get_next()
-            src, trg = sess.run([src_op, trg_op])
+            (src_val, src_row_lens), (trg_val, trg_row_lens) = iterator.get_next()
+            src_op, _, _ = data_pipe._compose_ragged_batch(src_val, src_row_lens)
+            trg_op, _, _ = data_pipe._compose_ragged_batch(trg_val, trg_row_lens)
+            src, trg = sess.run([src_op.to_sparse(), trg_op.to_sparse()])
             self.assertEqual(src.dense_shape[2], max_word_len + 1)
             self.assertEqual(trg.dense_shape[2], max_word_len + 1) # +1 for STOP
 
@@ -40,11 +49,14 @@ class TestPipeline(unittest.TestCase):
             batch_size = 2
             max_word_len = 1024
             max_line_len = 4
+            chr_to_id = self.setup_char_to_id(sess)
             iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
-                shuffle_buffer=16)
+                chr_to_id, shuffle_buffer=16)
             sess.run(iterator.initializer, feed_dict={filepattern:'./example_data/*.txt'})
-            src_op, trg_op = iterator.get_next()
-            src, trg = sess.run([src_op, trg_op])
+            (src_val, src_row_lens), (trg_val, trg_row_lens) = iterator.get_next()
+            src_op, _, _ = data_pipe._compose_ragged_batch(src_val, src_row_lens)
+            trg_op, _, _ = data_pipe._compose_ragged_batch(trg_val, trg_row_lens)
+            src, trg = sess.run([src_op.to_sparse(), trg_op.to_sparse()])
             self.assertEqual(src.dense_shape[1], max_line_len + 1)
             self.assertEqual(trg.dense_shape[1], max_line_len + 1) # +1 for STOP
 
@@ -56,30 +68,30 @@ class TestPipeline(unittest.TestCase):
             with open('./tmp_test_data', 'w') as tmp_data:
                 tmp_data.write(src_line)
                 tmp_data.write(trg_line)
-
             batch_size = 2 # applies to regular pipeline only.
             max_word_len = 20
             max_line_len = 32
-            go_stop_token = chr(0)
-            unk_token = chr(1)
-            _, _, chr_to_id = data_pipe.create_chr_dicts('./example_data/',
-                go_stop_token, unk_token)
+            chr_to_id = self.setup_char_to_id(sess)
             # file pipeline
             iterator, filepattern = data_pipe.make_pipeline(batch_size, max_word_len, max_line_len,
-                shuffle_buffer=1)
+                chr_to_id, shuffle_buffer=1)
             sess.run(iterator.initializer, feed_dict={filepattern:'./tmp_test_data'})
-            src_op, trg_op = iterator.get_next()
-            file_op = data_pipe.sparse_chr_to_dense_id(chr_to_id, src_op, trg_op)
+            (src_val, src_row_lens), (trg_val, trg_row_lens) = iterator.get_next()
+            src_op, _, _ = data_pipe._compose_ragged_batch(src_val, src_row_lens)
+            trg_op, _, _ = data_pipe._compose_ragged_batch(trg_val, trg_row_lens)
+            file_results = sess.run([src_op, trg_op])
             # placeholder pipeline
-            src_place, trg_place, src_op, trg_op = data_pipe.make_inference_pipeline()
-            placeholder_ops = data_pipe.sparse_chr_to_dense_id(chr_to_id, src_op, trg_op)
-            sess.run(tf.tables_initializer())
-            placeholder_results = sess.run(placeholder_ops, feed_dict={src_place:src_line.strip(), trg_place:trg_line})
-            file_results =  sess.run(file_op)
+            src_place, trg_place, (src_val, src_row_lens), (trg_val, trg_row_lens) = data_pipe.make_inference_pipeline(chr_to_id)
+            src_op, _, _ = data_pipe._compose_ragged_batch(src_val, src_row_lens)
+            trg_op, _, _ = data_pipe._compose_ragged_batch(trg_val, trg_row_lens)
+            placeholder_results = sess.run([src_op, trg_op], feed_dict={src_place:src_line.strip(), trg_place:trg_line})
             # Should get identical data representations from placeholder as from file
-            for placepipe, filepipe in zip(file_results, placeholder_results):
-                # filepipe has batch_size 2 with identical etries, placepipe is broadcasted
-                self.assertTrue(np.equal(placepipe, filepipe).all()) #
+            for filepipe, placepipe in zip(file_results, placeholder_results):
+                filepipe = filepipe.to_list()
+                placepipe = placepipe.to_list()
+                # filepipe has batch_size 2 with identical entries, check both
+                self.assertEqual(filepipe[0], placepipe[0])
+                self.assertEqual(filepipe[1], placepipe[0])
 
 class TestData(unittest.TestCase):
     def test_compiles(self):
@@ -104,7 +116,7 @@ class TestData(unittest.TestCase):
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
-            src, trg = sess.run([data.src, data.trg])
+            src, trg = sess.run([data.src.to_tensor(-1), data.trg.to_tensor(-1)])
             print "**** TESTING THAT TRG LINES FOLLOW AFTER SRC LINES IN DATASET ****"
             not_found_count = 0
             for src_str, trg_str in zip(data.array_to_strings(src), data.array_to_strings(trg)):
@@ -122,8 +134,8 @@ class TestData(unittest.TestCase):
                 for fname, indices in file_line_map.iteritems():
                     for index in indices:
                         line_after_src =  open(data.datadir + fname).readlines()[index + 1].strip()
-
-                        line_after_src = sess.run(data.trg_inference, feed_dict={data.trg_place: line_after_src})
+                        line_after_src = sess.run(data.trg_inference.to_tensor(-1),
+                            feed_dict={data.trg_place: line_after_src})
                         line_after_src = data.array_to_strings(line_after_src)[0]
                         line_after_src = line_after_src.replace(data.go_stop_token, '').strip()
                         print line_after_src
@@ -160,7 +172,9 @@ class TestData(unittest.TestCase):
             data = data_pipe.Data(basedir, batch_size, max_word_len, max_line_len)
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
-            src, trg = [data.array_to_strings(a) for a in sess.run([data.src, data.trg])]
+
+            src, trg = sess.run([data.src.to_tensor(-1), data.trg.to_tensor(-1)])
+            src, trg = [data.array_to_strings(a) for a in (src, trg)]
 
             print "***** BEGIN MANUAL INSPECTION ******"
             for src, trg in zip(src, trg):
@@ -180,19 +194,22 @@ class TestData(unittest.TestCase):
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
             (src,
-             trg,
              src_sentence_len,
+             src_word_len,
+             trg,
              trg_sentence_len,
-             trg_word_len) = sess.run([data.src,
-                                       data.trg,
+             trg_word_len) = sess.run([data.src.to_tensor(default_value=-1),
                                        data.src_sentence_len,
+                                       data.src_word_len.to_tensor(),
+                                       data.trg.to_tensor(default_value=-1),
                                        data.trg_sentence_len,
-                                       data.trg_word_len])
+                                       data.trg_word_len.to_tensor()])
             [src, trg] = [data.array_to_strings(a) for a in [src, trg]]
-
-            for src_sentence, trg_sentence, src_sent_len, trg_sent_len, trg_wrd_len in zip(
-                src, trg, src_sentence_len, trg_sentence_len, trg_word_len):
+            for src_sentence, trg_sentence, src_sent_len, src_wrd_len, trg_sent_len, trg_wrd_len in zip(
+                src, trg, src_sentence_len, src_word_len, trg_sentence_len, trg_word_len):
                 for word, length in zip(trg_sentence.split(' '), trg_wrd_len):
+                    self.assertEqual(len(word), length)
+                for word, length in zip(src_sentence.split(' '), src_wrd_len):
                     self.assertEqual(len(word), length)
                 self.assertEqual(len(src_sentence.strip().split(' ')), src_sent_len)
                 self.assertEqual(len(trg_sentence.strip().split(' ')), trg_sent_len)

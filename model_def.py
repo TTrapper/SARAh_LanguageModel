@@ -6,6 +6,8 @@ import data_pipe
 class Model(object):
     def __init__(self, src_sentence_3, src_sent_len_1, trg_sentence_3, trg_sent_len_1, num_chars,
         config):
+        src_sentence_3 = src_sentence_3.to_tensor(-1)
+        trg_sentence_3 = trg_sentence_3.to_tensor(-1)
         self.config = config
         self.num_chars = num_chars
         # Encode source sentence

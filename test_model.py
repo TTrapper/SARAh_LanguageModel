@@ -26,9 +26,9 @@ class TestModel(unittest.TestCase):
              src_sent_len_1,
              trg_sentence_3,
              trg_sent_len_1) = sess.run([model.out_logits_4,
-                                         data.src,
+                                         data.src.to_tensor(-1),
                                          data.src_sentence_len,
-                                         data.trg,
+                                         data.trg.to_tensor(-1),
                                          data.trg_sentence_len])
             src = data.array_to_strings(src_sentence_3)[0].replace(data.go_stop_token, '')
             trg = data.array_to_strings(trg_sentence_3)[0].replace(data.go_stop_token, '')
