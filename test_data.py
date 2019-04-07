@@ -139,7 +139,7 @@ class TestData(unittest.TestCase):
                         line_after_src = data.array_to_strings(line_after_src)[0]
                         line_after_src = line_after_src.replace(data.go_stop_token, '').strip()
                         print line_after_src
-                        if line_after_src == cleaned_trg:
+                        if line_after_src in cleaned_trg:
                             num_matches += 1
                 print
                 # At least one of the src lines found was followed by the trg line
@@ -173,13 +173,28 @@ class TestData(unittest.TestCase):
             sess.run(tf.tables_initializer())
             data.initialize(sess, data.datadir + '*')
 
-            src, trg = sess.run([data.src.to_tensor(-1), data.trg.to_tensor(-1)])
+            (src,
+             src_sentence_len,
+             src_word_len,
+             trg,
+             trg_sentence_len,
+             trg_word_len) = sess.run([data.src.to_tensor(-1),
+                data.src_sentence_len,
+                data.src_word_len.to_tensor(0),
+                data.trg.to_tensor(-1),
+                data.trg_sentence_len,
+                data.trg_word_len.to_tensor(0)])
             src, trg = [data.array_to_strings(a) for a in (src, trg)]
 
             print "***** BEGIN MANUAL INSPECTION ******"
-            for src, trg in zip(src, trg):
+            for src, src_sentence_len, src_word_len, trg, trg_sentence_len, trg_word_len in zip(src,
+                    src_sentence_len, src_word_len, trg, trg_sentence_len, trg_word_len):
                 print data_pipe.replace_pad_chrs(src)
+                print src_sentence_len
+                print src_word_len
                 print data_pipe.replace_pad_chrs(trg)
+                print trg_sentence_len
+                print trg_word_len
                 print
             print "***** END MANUAL INSPECTION ******"
 

@@ -28,6 +28,10 @@ class Data(object):
         (self.trg,
          self.trg_sentence_len,
          self.trg_word_len) = _compose_ragged_batch(trg_vals, trg_row_lens)
+        # Model reconstructs the src, then produces trg, so trg is the concatenation of the two.
+        self.trg = tf.concat([self.src, self.trg], axis=1)
+        self.trg_word_len = tf.concat([self.src_word_len, self.trg_word_len], axis=1)
+        self.trg_sentence_len += self.src_sentence_len
         # Build pipeline for running inference
         self.src_place, self.trg_place, src, trg = make_inference_pipeline(self.chr_to_id)
         (src_vals, src_row_lens), (trg_vals, trg_row_lens) = (src, trg)

@@ -11,7 +11,7 @@ def generate_config(keep_prob=0.9):
         'layer_norm':True,
         'keep_prob':keep_prob}]
 
-    sentence_encoder_layers = 6*[
+    sentence_encoder_layers = 4*[
        {'val_size':512,
         'key_size':128,
         'num_heads':8,

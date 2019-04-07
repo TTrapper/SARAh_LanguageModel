@@ -10,16 +10,14 @@ class Model(object):
         trg_sentence_3 = trg_sentence_3.to_tensor(-1)
         self.config = config
         self.num_chars = num_chars
-        # Encode source sentence
+        # Embed src words
         src_sentence_3 = self.build_word_encoder(src_sentence_3)
-        src_sentence_3 = self.build_sentence_encoder(src_sentence_3, src_sent_len_1,
-            src_sentence_3, src_sent_len_1, 'project_raw_words', config['sentence_encoder_layers'])
-        # Encode target sentence, conditioned on source
+        # Encode target sentence, conditioned on source words
         trg_sentence_encoded_3 = self.add_go(trg_sentence_3, axis=1)
         trg_sentence_encoded_3 = self.build_word_encoder(trg_sentence_encoded_3, reuse_vars=True)
         trg_sentence_encoded_3 = self.build_sentence_encoder(trg_sentence_encoded_3, trg_sent_len_1,
             src_sentence_3, src_sent_len_1, 'project_contextualized_words',
-            config['sentence_encoder_layers'], reuse=True)
+            config['sentence_encoder_layers'], reuse=False)
         # Generate target sentence char predictions by decoding word vectors
         self.out_logits_4 = self.build_word_decoder(trg_sentence_encoded_3, trg_sentence_3)
         # Ops for generating predictions durng inference
@@ -62,8 +60,12 @@ class Model(object):
             # Select char embeddings, create fixed-len word-spelling representation
             char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
             spell_vectors_3 = self.create_spell_vector(char_embeds_4, config['spell_vector_len'])
+            with tf.variable_scope('project_spell_vec'):
+                project_size = config['word_encoder_mlp'][-1]['num_nodes']
+                spell_vectors_3 = layers.feed_forward(spell_vectors_3, project_size)
             # Send spelling-vectors through MLP
             word_vectors_3 = layers.mlp(spell_vectors_3, config['word_encoder_mlp'])
+            word_vectors_3 += spell_vectors_3 # Skip connect
         return word_vectors_3
 
     def build_sentence_encoder(self, word_vectors_3, sentence_lens_1, condition_vectors_3,
@@ -79,8 +81,9 @@ class Model(object):
                 spec.update({'external_mem_array':condition_vectors_3,
                              'external_seq_lens':condition_seq_lens_1})
             # Build encoder
-            word_vectors_3 = layers.sarah(word_vectors_3, sentence_lens_1, False, layer_specs)
-        return word_vectors_3 # [batch, sentence_len, word_size]
+            encoded_3 = layers.sarah(word_vectors_3, sentence_lens_1, False, layer_specs)
+            encoded_3 = tf.concat([word_vectors_3, encoded_3], axis=2) # skip connect
+        return encoded_3 # [batch, sentence_len, word_size]
 
     def build_word_decoder(self, word_vectors_3, char_ids_3):
         config = self.config
@@ -99,8 +102,9 @@ class Model(object):
             spell_vectors_projected_3 = layers.feed_forward(spell_vectors_3, num_nodes=word_depth,
                 activation_fn=layers.gelu, keep_prob=config['keep_prob'], layer_norm=True,
                 seq_len_for_future_mask=spell_vector_len)
-            word_vectors_3 += spell_vectors_projected_3
-            word_vectors_3 = layers.mlp(word_vectors_3, config['word_decoder_mlp'])
+            word_and_chars_3 = word_vectors_3 + spell_vectors_projected_3
+            word_vectors_3 = layers.mlp(word_and_chars_3, config['word_decoder_mlp'])
+            word_vectors_3 += word_and_chars_3 # skip connect
             # Reshape word representation into individual char representations
             batch_size, sentence_len, word_len = tf.unstack(tf.shape(char_ids_3))
             char_size = word_vectors_3.shape.as_list()[-1]/spell_vector_len

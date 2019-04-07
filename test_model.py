@@ -15,7 +15,7 @@ class TestModel(unittest.TestCase):
         tf.reset_default_graph()
         with tf.Session() as sess:
             conf = config.generate_config(keep_prob=1.0)
-            conf['batch_size'] = 2
+            conf['batch_size'] = 1
             data = data_pipe.Data('./example_data/', conf['batch_size'], conf['max_word_len'], conf['max_line_len'])
             model, free_model = train.build_model(data, conf)
             data.initialize(sess, data.datadir + '*')
@@ -32,13 +32,20 @@ class TestModel(unittest.TestCase):
                                          data.trg_sentence_len])
             src = data.array_to_strings(src_sentence_3)[0].replace(data.go_stop_token, '')
             trg = data.array_to_strings(trg_sentence_3)[0].replace(data.go_stop_token, '')
-            trg = trg.strip()
+            # trg is the concatenation of itself with src. Restore the stop word that delimits them
+            trg = trg[len(src):]
+            trg = src + ' ' + data.go_stop_token + ' ' + trg.strip() # recombine src and trg
+            print src
+            print trg
             feed = {data.src_place:src, data.trg_place:trg}
-            free_logits_4 = sess.run(free_model.out_logits_4, feed_dict=feed)
+            (free_logits_4,
+             src_sentence_inference,
+             trg_sentence_inference) = sess.run([free_model.out_logits_4,
+                                                 data.src_inference.to_tensor(-1),
+                                                 data.trg_inference.to_tensor(-1)], feed_dict=feed)
             # Get the fist batch line and trim potential batch padding from the model's logits
             out_logits_3 = out_logits_4[0, :free_logits_4.shape[1], :free_logits_4.shape[2], :]
             # Check that the model's outputs are the same regardless of what data pipeline is used
-#            print np.abs(out_logits_3 - free_logits_4[0])
             self.assertTrue((np.abs(out_logits_3 - free_logits_4[0]) < 1e-5).all())
             # Run the inference model as though generating one char at time, and check the outputs
             feed = {data.src_place:src, data.trg_place:''} # Start with no input
