@@ -60,30 +60,40 @@ def build_train_op(loss, learn_rate, max_grad_norm):
     train_op = optimizer.apply_gradients(zip(grads, tvars))
     return train_op, grads, norm
 
-def run_inference(model, data, conf, sess, softmax_temp=1e-24):
-    # TODO: This is very slow because the entire model is rerun for each char prediction
+def run_inference(model, data, conf, sess):
     paths = [args.datadir + p for p in os.listdir(args.datadir)]
-    condition = data_pipe.getRandomSentence(paths, numSamples=1, sampleRange=1)[0][0]
-    condition = condition.strip()
-    print condition
-    result = ''
+    conditions = data_pipe.getRandomSentence(paths, numSamples=2)
+    for condition in conditions:
+        condition = condition[0].strip()
+        print condition
+        for softmax_temp in [1e-16, 0.75]:
+            print softmax_temp
+            # Reconstruct src from encoder representation
+            run_inference_once(model, data, conf, sess, softmax_temp, condition, '')
+            # Run inference for next sentence
+            run_inference_once(model, data, conf, sess, softmax_temp, condition, condition)
+        print
+
+def run_inference_once(model, data, conf, sess, softmax_temp, src_condition, trg_condition):
+    # TODO: This is very slow because the entire model is rerun for each char prediction
+    result = trg_condition
     char_idx = 0
-    word_idx = 0
+    word_idx = len(result.split())
     try:
         for char_count in range(128):
-            feed = {data.src_place:condition, data.trg_place:result.strip(), model.softmax_temp:softmax_temp}
+            feed = {data.src_place:src_condition, data.trg_place:result.strip(), model.softmax_temp:softmax_temp}
             predictions = sess.run(model.predictions_3, feed_dict=feed)
             next_char = data.id_to_chr[predictions[0, word_idx, char_idx]]
             if next_char == data.go_stop_token:
                 if char_idx == 0: # EOS
-                    print result
-                    return
-                next_char = ' '
+                    result += ' ' + data.go_stop_token
+                result += ' '
                 word_idx += 1
-                char_idx = -1
-            result += next_char
-            char_idx += 1
-        print result
+                char_idx = 0
+            else:
+                result += next_char
+                char_idx += 1
+        print result.replace(' {} '.format(data.go_stop_token), ' <STOP> ')
     except Exception as e:
         print 'Inference failed: '
         print e
@@ -109,9 +119,11 @@ def train():
         recent_costs.append(c)
         if batch_num%250 == 0:
             print batch_num, sum(recent_costs)/len(recent_costs), n
-            run_inference(free_model, data, conf, sess)
             saver.save(sess, './saves/model.ckpt')
-            sys.stdout.flush()
+        if batch_num%1000 == 10:
+            run_inference(free_model, data, conf, sess)
+            print
+        sys.stdout.flush()
         batch_num += 1
 
 

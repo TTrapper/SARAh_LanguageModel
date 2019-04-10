@@ -159,13 +159,23 @@ def multihead_attention(values_3, keys_3, query_2, sequence_lengths_1, num_heads
     values_2 = tf.reduce_sum(values_3, axis=1)
     return values_2
 
-def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs):
+def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs, initial_state=None):
     """
     inputs_3: Tensor with shape: [batch_size, max_seq_len, input_depth]
     seq_lens_1: Tensor with shape [batch_size]
     layer_specs: list containing kwargs for one or more SelfAttentiveCell
     bidirectional: boolean whether to create a backward_cell
+    initial_state: tuple of tensors ([batch_size, 1], [batch_size, mem_length, mem_size]
+                    The inital sequence lengths and contents of the SARAh's mem array
     """
+    if initial_state is not None:
+        if bidirectional:
+            raise NotImplemented('bidirectional SARAh does not yet support setting initial_state')
+        # flatten the sequence of mem_vals to [batch_size, mem_length*mem_size]
+        mem_vals = initial_state[1]
+        batch_size, mem_length, mem_size = tf.unstack(tf.shape(mem_vals))
+        mem_vals = tf.reshape(mem_vals, [batch_size, mem_length*mem_size])
+        initial_state = (initial_state[0], mem_vals)
     cells = [SelfAttentiveCell(**kwargs) for kwargs in layer_specs]
     if bidirectional:
         backward_cells = [SelfAttentiveCell(**kwargs) for kwargs in layer_specs]
@@ -173,16 +183,16 @@ def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs):
             backward_cells, inputs_3, dtype=inputs_3.dtype, sequence_length=seq_lens_1)
         return outputs_3
     else:
-        cell = tf.nn.rnn_cell.MultiRNNCell(cells)
+        cell = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=True)
         outputs_3, state = tf.nn.dynamic_rnn(cell, inputs=inputs_3, dtype=inputs_3.dtype,
-            sequence_length=seq_lens_1)
+            sequence_length=seq_lens_1, initial_state=tuple(len(cells)*[initial_state]))
         return outputs_3
 
 class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
         external_seq_lens=None, keep_prob=1.0, activation_fn=None):
         """ """
-        self.attention_window = 16 #TODO make this configurable
+        self.attention_window = 33 #TODO make this configurable
         super(SelfAttentiveCell, self).__init__()
         self.val_size = val_size
         self.key_size = key_size

@@ -76,12 +76,10 @@ class Model(object):
             with tf.variable_scope(condition_projection_scope, reuse=tf.AUTO_REUSE):
                 mem_size = layer_specs[0]['val_size'] + layer_specs[0]['key_size']
                 condition_vectors_3 = layers.feed_forward(condition_vectors_3, mem_size)
-            # Add conditioning sequence to the layer_specs
-            for spec in layer_specs:
-                spec.update({'external_mem_array':condition_vectors_3,
-                             'external_seq_lens':condition_seq_lens_1})
+                initial_state = (tf.expand_dims(condition_seq_lens_1, axis=1), condition_vectors_3)
             # Build encoder
-            encoded_3 = layers.sarah(word_vectors_3, sentence_lens_1, False, layer_specs)
+            encoded_3 = layers.sarah(word_vectors_3, sentence_lens_1, False, layer_specs,
+                initial_state)
             encoded_3 = tf.concat([word_vectors_3, encoded_3], axis=2) # skip connect
         return encoded_3 # [batch, sentence_len, word_size]
 
