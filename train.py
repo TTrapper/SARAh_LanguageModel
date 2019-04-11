@@ -75,6 +75,12 @@ def run_inference(model, data, conf, sess):
         print
 
 def run_inference_once(model, data, conf, sess, softmax_temp, src_condition, trg_condition):
+    """
+    src_condition: string representing the source sentence
+    trg_condition: string representing the source sentence, or an empty string. The model is
+        trained to first reconstruct the source sentence, then predict the target. Providing
+        the source sentence here allows inference to skip straight to generating the target.
+    """
     # TODO: This is very slow because the entire model is rerun for each char prediction
     result = trg_condition
     char_idx = 0
@@ -93,7 +99,8 @@ def run_inference_once(model, data, conf, sess, softmax_temp, src_condition, trg
             else:
                 result += next_char
                 char_idx += 1
-        print result.replace(' {} '.format(data.go_stop_token), ' <STOP> ')
+        result = result.replace(trg_condition, '').replace(' {} '.format(data.go_stop_token), ' __ ')
+        print result
     except Exception as e:
         print 'Inference failed: '
         print e
