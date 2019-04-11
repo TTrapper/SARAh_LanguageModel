@@ -93,6 +93,28 @@ class TestPipeline(unittest.TestCase):
                 self.assertEqual(filepipe[0], placepipe[0])
                 self.assertEqual(filepipe[1], placepipe[0])
 
+    def test_shuffle_words(self):
+        tf.reset_default_graph()
+        with tf.Session() as sess:
+            batch_size = 6
+            max_line_len = 128
+            max_word_len = 3
+            max_chr_id = 8
+            # An artificial batch of sentence
+            char_ids = tf.constant(np.random.randint(0, max_chr_id, [batch_size, max_line_len, max_word_len]))
+            sentence_lens = tf.constant(np.random.randint(max_line_len/2, max_line_len, [batch_size]))
+            char_ids_shuffled = data_pipe.shuffle_words(char_ids, sentence_lens)
+            char_ids, sentence_lens, char_ids_shuffled = sess.run([char_ids, sentence_lens, char_ids_shuffled])
+            for line, sent_len, line_shuffled in zip(char_ids, sentence_lens, char_ids_shuffled):
+                # Pad words (the ones beyond the sentence length) should be untouched
+                self.assertTrue((line[sent_len:] == line_shuffled[sent_len:]).all())
+                # If the words of the sentence have been shuffled, then the shuffled line must differ
+                self.assertFalse((line == line_shuffled).all())
+                # Each word in the shuffled line appears in the original
+                line = line[:sent_len]
+                for shuffled_word in line[:sent_len]:
+                    self.assertTrue(shuffled_word in line)
+
 class TestData(unittest.TestCase):
     def test_compiles(self):
         tf.reset_default_graph()

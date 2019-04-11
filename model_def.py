@@ -11,6 +11,7 @@ class Model(object):
         self.config = config
         self.num_chars = num_chars
         # Embed src words
+        src_sentence_3 = data_pipe.shuffle_words(src_sentence_3, src_sent_len_1) #FIXME reshuffled on intermidiate predictions during inference
         src_sentence_3 = self.build_word_encoder(src_sentence_3)
         # Encode target sentence, conditioned on source words
         trg_sentence_encoded_3 = self.add_go(trg_sentence_3, axis=1)

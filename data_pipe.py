@@ -184,6 +184,17 @@ def get_sentence_lens(char_ids_3, wordlens_2=None):
     sentence_lens_1 = tf.reduce_sum(mask, axis=1)
     return sentence_lens_1
 
+# Shuffles the words in a batch of sentences, respecting variable lengths (doesn't mix in padding)
+def shuffle_words(char_ids_3, sentence_lens_1):
+    max_len = tf.shape(char_ids_3)[1] # max(sentence_lens_1) breaks if all are smaller than this dim
+    indices_2 = []
+    for sentence_len in tf.unstack(sentence_lens_1):
+        indices_1 = tf.random.shuffle(tf.range(sentence_len))
+        pad_1 = tf.range(sentence_len, max_len)
+        indices_2.append(tf.concat([indices_1, pad_1], axis=0))
+    indices_2 = tf.stack(indices_2)
+    return tf.batch_gather(char_ids_3, indices_2)
+
 def char_array_to_txt(char_array_3):
     return '\n'.join([' '.join([''.join(word) for word in line]) for line in char_array_3])
 
