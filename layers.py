@@ -233,10 +233,8 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
                     self.external_mem_array = feed_forward(self.external_mem_array, self.mem_size)
             self.external_vals = self.external_mem_array[:, :, :self.val_size]
             self.external_keys = self.external_mem_array[:, :, -self.key_size:]
-        kernel_in = self.val_size
-        kernel_out = self.val_size + self.num_keys*self.key_size
-        self._kernel = self.add_variable('weights', shape=[kernel_in, kernel_out])
-        self._bias = self.add_variable('biases', shape=[kernel_out],
+        self._kernel = self.add_variable('weights', shape=[self.val_size, self.output_size])
+        self._bias = self.add_variable('biases', shape=[self.output_size],
             initializer=tf.zeros_initializer(dtype=self.dtype))
         self.built = True
 
