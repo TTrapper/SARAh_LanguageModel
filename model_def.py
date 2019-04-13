@@ -23,8 +23,7 @@ class Model(object):
         trg_sentence_encoded_3 = self.add_go(trg_sentence_3, axis=1)
         trg_sentence_encoded_3 = self.build_word_encoder(trg_sentence_encoded_3, reuse_vars=True)
         trg_sentence_encoded_3 = self.build_sentence_encoder(trg_sentence_encoded_3, trg_sent_len_1,
-            src_word_embeds_3, src_sent_len_1, 'project_contextualized_words',
-            config['sentence_encoder_layers'], reuse=False)
+            src_word_embeds_3, src_sent_len_1, config['sentence_encoder_layers'])
         # Generate target sentence char predictions by decoding word vectors
         self.out_logits_4 = self.build_word_decoder(trg_sentence_encoded_3, trg_sentence_3)
         # Ops for generating predictions durng inference
@@ -75,11 +74,11 @@ class Model(object):
         return word_vectors_3
 
     def build_sentence_encoder(self, word_vectors_3, sentence_lens_1, condition_vectors_3,
-        condition_seq_lens_1, condition_projection_scope, layer_specs, reuse=False):
-        with tf.variable_scope('sentence_encoder', reuse=reuse):
+        condition_seq_lens_1, layer_specs):
+        with tf.variable_scope('sentence_encoder'):
             # Project the conditioning sequence to the depth of the layer cell. Assuming all layers
             # are  the same size, this results in one projection instead of one per layer.
-            with tf.variable_scope(condition_projection_scope, reuse=tf.AUTO_REUSE):
+            with tf.variable_scope('project_to_mem_size'):
                 mem_size = layer_specs[0]['val_size'] + layer_specs[0]['key_size']
                 condition_vectors_3 = layers.feed_forward(condition_vectors_3, mem_size)
                 initial_state = (tf.expand_dims(condition_seq_lens_1, axis=1), condition_vectors_3)
