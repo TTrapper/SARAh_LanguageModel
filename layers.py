@@ -29,12 +29,13 @@ def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_pr
     with tf.variable_scope('feed_forward'):
         weights = tf.get_variable('weights', [inputs.shape.as_list()[-1], num_nodes])
         biases = tf.get_variable('biases', [num_nodes], initializer=tf.zeros_initializer())
-    indepth = tf.shape(inputs)[-1]
     outshape = tf.concat([tf.shape(inputs)[:-1], [num_nodes]], axis=0)
+    indepth = inputs.shape.as_list()[-1]
     if seq_len_for_future_mask is not None:
-        weight_mask = future_mask(seq_len_for_future_mask, inputs.shape.as_list()[-1], num_nodes)
+        weight_mask = future_mask(seq_len_for_future_mask, indepth, num_nodes)
         weights = tf.where(weight_mask, weights, tf.zeros_like(weights))
-    outputs = tf.matmul(tf.reshape(inputs, [-1, indepth]), weights) + biases
+    inputs = tf.reshape(inputs, [-1, indepth])
+    outputs = tf.matmul(inputs, weights) + biases
     if layer_norm:
         if seq_len_for_future_mask is not None:
             # Apply layer_norm to sequence items independently, preventing look ahead.
@@ -49,7 +50,11 @@ def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_pr
         outputs = activation_fn(outputs)
     if keep_prob < 1.0:
         outputs = tf.nn.dropout(outputs, keep_prob)
-    return tf.reshape(outputs, outshape)
+    # Always add residual connection if the shapes match up
+    if indepth == num_nodes:
+        outputs = outputs + inputs
+    outputs = tf.reshape(outputs, outshape)
+    return outputs
 
 def future_mask(seq_len, in_size, out_size):
     """
@@ -168,6 +173,7 @@ def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs, initial_state=None):
     initial_state: tuple of tensors ([batch_size, 1], [batch_size, mem_length, mem_size]
                     The inital sequence lengths and contents of the SARAh's mem array
     """
+    cells = [SelfAttentiveCell(**kwargs) for kwargs in layer_specs]
     if initial_state is not None:
         if bidirectional:
             raise NotImplemented('bidirectional SARAh does not yet support setting initial_state')
@@ -176,7 +182,7 @@ def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs, initial_state=None):
         batch_size, mem_length, mem_size = tf.unstack(tf.shape(mem_vals))
         mem_vals = tf.reshape(mem_vals, [batch_size, mem_length*mem_size])
         initial_state = (initial_state[0], mem_vals)
-    cells = [SelfAttentiveCell(**kwargs) for kwargs in layer_specs]
+        initial_state=tuple(len(cells)*[initial_state])
     if bidirectional:
         backward_cells = [SelfAttentiveCell(**kwargs) for kwargs in layer_specs]
         outputs_3, state_fw, state_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(cells,
@@ -185,7 +191,7 @@ def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs, initial_state=None):
     else:
         cell = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=True)
         outputs_3, state = tf.nn.dynamic_rnn(cell, inputs=inputs_3, dtype=inputs_3.dtype,
-            sequence_length=seq_lens_1, initial_state=tuple(len(cells)*[initial_state]))
+            sequence_length=seq_lens_1, initial_state=initial_state)
         return outputs_3
 
 class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
@@ -256,6 +262,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         memory = tf.concat([new_mem_val, memory[:, :-1, :]], axis=1)
         if self.keep_prob < 1.0:
             output = tf.nn.dropout(output, keep_prob=self.keep_prob)
+        output += inputs # residual connection
         return output, (seq_lens + 1, tf.reshape(memory, [-1, self.attention_window*self.mem_size]))
 
     def _attend_to_memory(self, memory_3, query, seq_lens):

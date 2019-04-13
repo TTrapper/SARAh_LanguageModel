@@ -66,7 +66,6 @@ class Model(object):
                 spell_vectors_3 = layers.feed_forward(spell_vectors_3, project_size)
             # Send spelling-vectors through MLP
             word_vectors_3 = layers.mlp(spell_vectors_3, config['word_encoder_mlp'])
-            word_vectors_3 += spell_vectors_3 # Skip connect
         return word_vectors_3
 
     def build_sentence_encoder(self, word_vectors_3, sentence_lens_1, condition_vectors_3,
@@ -81,7 +80,6 @@ class Model(object):
             # Build encoder
             encoded_3 = layers.sarah(word_vectors_3, sentence_lens_1, False, layer_specs,
                 initial_state)
-            encoded_3 = tf.concat([word_vectors_3, encoded_3], axis=2) # skip connect
         return encoded_3 # [batch, sentence_len, word_size]
 
     def build_word_decoder(self, word_vectors_3, char_ids_3):
@@ -103,7 +101,6 @@ class Model(object):
                 seq_len_for_future_mask=spell_vector_len)
             word_and_chars_3 = word_vectors_3 + spell_vectors_projected_3
             word_vectors_3 = layers.mlp(word_and_chars_3, config['word_decoder_mlp'])
-            word_vectors_3 += word_and_chars_3 # skip connect
             # Reshape word representation into individual char representations
             batch_size, sentence_len, word_len = tf.unstack(tf.shape(char_ids_3))
             char_size = word_vectors_3.shape.as_list()[-1]/spell_vector_len
