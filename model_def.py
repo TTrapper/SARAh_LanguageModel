@@ -5,19 +5,25 @@ import data_pipe
 
 class Model(object):
     def __init__(self, src_sentence_3, src_sent_len_1, trg_sentence_3, trg_sent_len_1, num_chars,
-        config):
+        config, inference_mode=False):
         src_sentence_3 = src_sentence_3.to_tensor(-1)
         trg_sentence_3 = trg_sentence_3.to_tensor(-1)
         self.config = config
         self.num_chars = num_chars
         # Embed src words
-        src_sentence_3 = data_pipe.shuffle_words(src_sentence_3, src_sent_len_1) #FIXME reshuffled on intermidiate predictions during inference
-        src_sentence_3 = self.build_word_encoder(src_sentence_3)
+        # Shuffle to prevent word order from being infered when they drop off the SARAh's mem array
+        src_sentence_3 = data_pipe.shuffle_words(src_sentence_3, src_sent_len_1)
+        src_word_embeds_3 = self.build_word_encoder(src_sentence_3)
+        if inference_mode:
+            self.src_word_embeds_3 = src_word_embeds_3
+            self.src_word_placeholder_3 = tf.placeholder(name='src_word_embeds_3',
+                dtype=self.src_word_embeds_3.dtype, shape=src_word_embeds_3.shape)
+            src_word_embeds_3 = self.src_word_placeholder_3
         # Encode target sentence, conditioned on source words
         trg_sentence_encoded_3 = self.add_go(trg_sentence_3, axis=1)
         trg_sentence_encoded_3 = self.build_word_encoder(trg_sentence_encoded_3, reuse_vars=True)
         trg_sentence_encoded_3 = self.build_sentence_encoder(trg_sentence_encoded_3, trg_sent_len_1,
-            src_sentence_3, src_sent_len_1, 'project_contextualized_words',
+            src_word_embeds_3, src_sent_len_1, 'project_contextualized_words',
             config['sentence_encoder_layers'], reuse=False)
         # Generate target sentence char predictions by decoding word vectors
         self.out_logits_4 = self.build_word_decoder(trg_sentence_encoded_3, trg_sentence_3)

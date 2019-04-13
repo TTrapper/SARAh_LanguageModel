@@ -12,6 +12,7 @@ import train
 
 class TestModel(unittest.TestCase):
     def test_inference_vs_train(self):
+        self.assertTrue(False) # disable and auto fail this test for now
         tf.reset_default_graph()
         with tf.Session() as sess:
             conf = config.generate_config(keep_prob=1.0)

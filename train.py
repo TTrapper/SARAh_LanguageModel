@@ -31,7 +31,8 @@ def build_model(data, conf, reuse=False):
             data.trg_inference,
             data.trg_sentence_len_inference,
             len(data.chr_to_freq),
-            conf)
+            conf,
+            inference_mode=True)
     for v in tf.trainable_variables():
         print v
     return model, free_model
@@ -81,13 +82,19 @@ def run_inference_once(model, data, conf, sess, softmax_temp, src_condition, trg
         trained to first reconstruct the source sentence, then predict the target. Providing
         the source sentence here allows inference to skip straight to generating the target.
     """
-    # TODO: This is very slow because the entire model is rerun for each char prediction
+    # TODO: This is very slow because nearly the entire model is rerun for each char prediction
     result = trg_condition
     char_idx = 0
     word_idx = len(result.split())
     try:
+        # Compute word embeddings for src once, then pass them as placeholder
+        src_word_embeds_3 = sess.run(model.src_word_embeds_3, feed_dict={data.src_place:src_condition})
+        # Get chr predictions from the model and feed them back in
         for char_count in range(128):
-            feed = {data.src_place:src_condition, data.trg_place:result.strip(), model.softmax_temp:softmax_temp}
+            feed = {model.src_word_placeholder_3:src_word_embeds_3,
+                    data.src_place:src_condition,
+                    data.trg_place:result.strip(),
+                    model.softmax_temp:softmax_temp}
             predictions = sess.run(model.predictions_3, feed_dict=feed)
             next_char = data.id_to_chr[predictions[0, word_idx, char_idx]]
             if next_char == data.go_stop_token:
