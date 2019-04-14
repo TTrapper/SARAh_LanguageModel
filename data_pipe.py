@@ -7,21 +7,18 @@ import tensorflow as tf
 
 class Data(object):
     def __init__(self, datadir, batch_size, max_word_len, max_line_len, go_stop_token=chr(0),
-        unk_token=chr(1)):
+        eval_mode=False):
+        """ """
         self.datadir = datadir
         self.go_stop_token = go_stop_token
-        self.unk_token = unk_token
-        (self.chr_to_freq,
-         self.id_to_chr,
-         self.chr_to_id) = create_chr_dicts(self.datadir, go_stop_token, unk_token,
-                                            max_num_chrs=None)
+        # Create chr to numerical id maps, assume utf-8 encoding
+        self.id_to_chr = [chr(i) for i in range(256)]
+        self.chr_to_id = tf.contrib.lookup.index_table_from_tensor(self.id_to_chr)
         # Build pipeline for training and eval
         self.iterator, self.filepattern = make_pipeline(batch_size, max_word_len, max_line_len,
-            self.chr_to_id, cycle_length=len(os.listdir(self.datadir)))
+            self.chr_to_id, cycle_length=1 if eval_mode else len(os.listdir(self.datadir)),
+            shuffle_buffer= 1 if eval_mode else 4096, repeat=not eval_mode)
         (src_vals, src_row_lens), (trg_vals, trg_row_lens) = self.iterator.get_next()
-        sess = tf.Session()
-        sess.run(self.iterator.initializer, feed_dict={self.filepattern:'./example_data/*'})
-        sess.run(tf.tables_initializer())
         (self.src,
          self.src_sentence_len,
          self.src_word_len) = _compose_ragged_batch(src_vals, src_row_lens)
@@ -48,15 +45,15 @@ class Data(object):
             for word in sentence]) for sentence in array_3]
 
 
-
 def make_pipeline(batch_size, max_word_len, max_line_len, chr_to_id, cycle_length=128,
-    shuffle_buffer=4096):
+    shuffle_buffer=4096, repeat=True):
     do_shuffle = shuffle_buffer > 1
     sloppy = do_shuffle
     filepattern = tf.placeholder(dtype=tf.string, name='filepattern')
     numfiles = tf.placeholder(dtype=tf.int64, name='numfiles')
-    # TODO try tf.data.experimental.shuffle_and_repeat(
-    filepaths = tf.data.Dataset.list_files(filepattern, shuffle=do_shuffle).repeat()
+    filepaths = tf.data.Dataset.list_files(filepattern, shuffle=do_shuffle)
+    if repeat: # TODO try tf.data.experimental.shuffle_and_repeat(
+        filepaths = filepaths.repeat()
     file_processor = _make_file_processor_fn(max_word_len, max_line_len)
     pair = filepaths.apply(tf.contrib.data.parallel_interleave(# TODO try tf.data.experimental.sample_from_datasets
         file_processor, sloppy=sloppy, cycle_length=cycle_length))
@@ -147,14 +144,10 @@ def make_inference_pipeline(chr_to_id):
 
 def create_chr_dicts(dirname, go_stop_token, unk_token, max_num_chrs=None):
     chr_to_freq = None
-#    freq_path = basedir + '/chr_to_freq'
-#    if os.path.exists(freq_path):
-#        chr_to_freq = pickle.load(open(freq_path))
     if chr_to_freq is None:
         chr_to_freq = Counter()
         for f in os.listdir(dirname):
             chr_to_freq += Counter(open(dirname + f, 'r').read())
-#        pickle.dump(chr_to_freq, open(freq_path, 'wb'))
     if go_stop_token in chr_to_freq or unk_token in chr_to_freq:
         raise ValueError('Reserved character found in dataset:\n' + str(chr_to_freq))
     chr_to_freq += Counter(go_stop_token + unk_token)

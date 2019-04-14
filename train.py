@@ -14,6 +14,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', type=str, required=True)
 parser.add_argument('--restore', type=str, default=None)
 parser.add_argument('--keep_prob', type=float, default=0.9)
+parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'])
+def parse_bool_arg(arg_str):
+    return arg_str == 'yes' or arg_str == 'true'
 
 def build_model(data, conf, reuse=False):
     with tf.variable_scope('Model', dtype=tf.float32, reuse=reuse) as scope:
@@ -21,7 +24,7 @@ def build_model(data, conf, reuse=False):
             data.src_sentence_len,
             data.trg,
             data.trg_sentence_len,
-            len(data.chr_to_freq),
+            len(data.id_to_chr),
             conf)
         scope.reuse_variables()
         # Create a copy of the model that operates over the inference pipeline
@@ -30,7 +33,7 @@ def build_model(data, conf, reuse=False):
             data.src_sentence_len_inference,
             data.trg_inference,
             data.trg_sentence_len_inference,
-            len(data.chr_to_freq),
+            len(data.id_to_chr),
             conf,
             inference_mode=True)
     for v in tf.trainable_variables():
@@ -115,7 +118,8 @@ def run_inference_once(model, data, conf, sess, softmax_temp, src_condition, trg
 
 def train():
     conf = config.generate_config(args.keep_prob)
-    data = data_pipe.Data(args.datadir, conf['batch_size'], conf['max_word_len'], conf['max_line_len'])
+    data = data_pipe.Data(args.datadir, conf['batch_size'], conf['max_word_len'],
+        conf['max_line_len'], eval_mode=args.eval_mode)
     model, free_model = build_model(data, conf)
     loss = calc_loss(model.out_logits_4, data.trg, data.trg_word_len, data.trg_sentence_len)
     train_op, grads, norm = build_train_op(loss, conf['learn_rate'], conf['max_grad_norm'])
@@ -127,20 +131,34 @@ def train():
         saver.restore(sess, args.restore)
     data.initialize(sess, data.datadir + '*')
     recent_costs = deque(maxlen=100)
+    ops = {'norm':norm, 'loss':loss}
+    if not args.eval_mode:
+        ops['train'] = train_op
     batch_num = 0
     while True:
-        [_,n,c] = sess.run([train_op,norm,loss])
-        recent_costs.append(c)
-        if batch_num%250 == 0:
-            print batch_num, sum(recent_costs)/len(recent_costs), n
-            saver.save(sess, './saves/model.ckpt')
-        if batch_num%1000 == 10:
+        batch_num += 1
+        try:
+            out = sess.run(ops)
+            n = out['norm']
+            c = out['loss']
+            recent_costs.append(c)
+            if args.eval_mode: # for eval we want the total cost over the entire epoch
+                recent_costs = [sum(recent_costs)]
+        except tf.errors.OutOfRangeError as e:
+            print 'EOE:', batch_num, sum(recent_costs)/batch_num
+            return
+        if batch_num%250 == 1:
+            cost_window = len(recent_costs) if not args.eval_mode else batch_num
+            print batch_num, sum(recent_costs)/cost_window, n
+            if not args.eval_mode:
+                saver.save(sess, './saves/model.ckpt')
+        if not args.eval_mode and batch_num%1000 == 10:
             run_inference(free_model, data, conf, sess)
             print
         sys.stdout.flush()
-        batch_num += 1
 
 
 if __name__ == '__main__':
     args = parser.parse_args()
+    args.eval_mode = parse_bool_arg(args.eval_mode)
     train()
