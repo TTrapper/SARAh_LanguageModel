@@ -119,7 +119,7 @@ def run_inference_once(model, data, conf, sess, softmax_temp, src_condition, trg
         print result
 
 def train():
-    conf = config.generate_config(args.keep_prob)
+    conf = config.generate_config(args.keep_prob, args.noise_level)
     data = data_pipe.Data(args.datadir, conf['batch_size'], conf['max_word_len'],
         conf['max_line_len'], eval_mode=args.eval_mode)
     model, free_model = build_model(data, conf)
