@@ -19,8 +19,20 @@ def embedding(num_embeddings, embed_size, indices):
     embeddings *= mask
     return embeddings
 
+def gaussian_noise(inputs_2, noise_level):
+    """
+    Produces a perturbation for each row of inputs_2 with a gaussian that is proportional to the
+    row's variance. The perturbation has mean 0 and stddev equal to noise_level * stddev(row).
+    inputs_2: a 2D tensor to which row-wise pertubations will be added.
+    noise_level: a scalar multiplier for the perturbation's stddev.
+    """
+    _, variance_1 = tf.nn.moments(inputs_2, axes=[-1])
+    stddev_2 = tf.expand_dims(noise_level*(variance_1**0.5), axis=1)
+    pertubation_2 = stddev_2 * tf.random_normal(tf.shape(inputs_2))
+    return pertubation_2
+
 def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_prob=1.0,
-        seq_len_for_future_mask=None):
+        seq_len_for_future_mask=None, noise_level=0):
     """
     seq_len_for_future_mask: Used to construct a weight mask that prevents the layer from looking
         into the future. Assumes the input is a concatenated sequence of items, such as char embeds.
@@ -48,6 +60,8 @@ def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_pr
             outputs = do_layer_norm(outputs)
     if activation_fn is not None:
         outputs = activation_fn(outputs)
+    if noise_level > 0:
+        outputs += gaussian_noise(outputs, noise_level)
     if keep_prob < 1.0:
         outputs = tf.nn.dropout(outputs, keep_prob)
     # Always add residual connection if the shapes match up
@@ -196,7 +210,7 @@ def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs, initial_state=None):
 
 class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
-        external_seq_lens=None, keep_prob=1.0, activation_fn=None):
+        external_seq_lens=None, keep_prob=1.0, noise_level=0.0, activation_fn=None):
         """ """
         self.attention_window = 33 #TODO make this configurable
         super(SelfAttentiveCell, self).__init__()
@@ -206,6 +220,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         self.num_keys = 1 if external_mem_array is None else 2
         self.num_heads = num_heads
         self.keep_prob = keep_prob
+        self.noise_level = noise_level
         self.activation_fn = activation_fn
         self.project_inputs = False
         self.external_mem_array = external_mem_array
@@ -249,7 +264,10 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         if self.external_mem_array is not None:
             query = inputs[:, -self.key_size:] # not the same query used for internal mem
             context += self._attend_to_external(query)
-        output = tf.matmul(value + context, self._kernel)
+        value += context
+        if self.noise_level > 0.0:
+            value += gaussian_noise(value, self.noise_level)
+        output = tf.matmul(value, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
         output = do_layer_norm(output)
         if self.activation_fn is not None:

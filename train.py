@@ -13,8 +13,10 @@ import config
 parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', type=str, required=True)
 parser.add_argument('--restore', type=str, default=None)
-parser.add_argument('--keep_prob', type=float, default=0.9)
+parser.add_argument('--keep_prob', type=float, default=1.0)
+parser.add_argument('--noise_level', type=float, default=0.0)
 parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'])
+
 def parse_bool_arg(arg_str):
     return arg_str == 'yes' or arg_str == 'true'
 
@@ -28,7 +30,7 @@ def build_model(data, conf, reuse=False):
             conf)
         scope.reuse_variables()
         # Create a copy of the model that operates over the inference pipeline
-        conf = config.generate_config(1.0)
+        conf = config.generate_config(keep_prob=1.0, noise_level=0.0)
         free_model = model_def.Model(data.src_inference,
             data.src_sentence_len_inference,
             data.trg_inference,
