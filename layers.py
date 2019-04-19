@@ -41,6 +41,7 @@ def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_pr
     with tf.variable_scope('feed_forward'):
         weights = tf.get_variable('weights', [inputs.shape.as_list()[-1], num_nodes])
         biases = tf.get_variable('biases', [num_nodes], initializer=tf.zeros_initializer())
+    inshape = tf.shape(inputs)
     outshape = tf.concat([tf.shape(inputs)[:-1], [num_nodes]], axis=0)
     indepth = inputs.shape.as_list()[-1]
     if seq_len_for_future_mask is not None:
@@ -48,26 +49,21 @@ def feed_forward(inputs, num_nodes, activation_fn=None, layer_norm=True, keep_pr
         weights = tf.where(weight_mask, weights, tf.zeros_like(weights))
     inputs = tf.reshape(inputs, [-1, indepth])
     outputs = tf.matmul(inputs, weights) + biases
+    if seq_len_for_future_mask is not None:
+        # Flatten implied sequence to prevent layer_norm/noise from leaking future information
+        outputs = tf.reshape(outputs, [-1, num_nodes/seq_len_for_future_mask])
     if layer_norm:
-        if seq_len_for_future_mask is not None:
-            # Apply layer_norm to sequence items independently, preventing look ahead.
-            flat_shape = tf.shape(outputs)
-            seq_shape = [-1, seq_len_for_future_mask, num_nodes/seq_len_for_future_mask]
-            outputs = tf.reshape(outputs, seq_shape)
-            outputs = do_layer_norm(outputs)
-            outputs = tf.reshape(outputs, flat_shape)
-        else:
-            outputs = do_layer_norm(outputs)
+        outputs = do_layer_norm(outputs)
     if activation_fn is not None:
         outputs = activation_fn(outputs)
     if noise_level > 0:
         outputs += gaussian_noise(outputs, noise_level)
     if keep_prob < 1.0:
         outputs = tf.nn.dropout(outputs, keep_prob)
+    outputs = tf.reshape(outputs, outshape)
     # Always add residual connection if the shapes match up
     if indepth == num_nodes:
-        outputs = outputs + inputs
-    outputs = tf.reshape(outputs, outshape)
+        outputs += tf.reshape(inputs, inshape)
     return outputs
 
 def future_mask(seq_len, in_size, out_size):
