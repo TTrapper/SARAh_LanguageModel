@@ -187,10 +187,16 @@ def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs, initial_state=None):
     if initial_state is not None:
         if bidirectional:
             raise NotImplemented('bidirectional SARAh does not yet support setting initial_state')
-        # flatten the sequence of mem_vals to [batch_size, mem_length*mem_size]
         mem_vals = initial_state[1]
+        attention_window = layer_specs[0]['attention_window'] #FIXME assumes same size on all layers
         batch_size, mem_length, mem_size = tf.unstack(tf.shape(mem_vals))
-        mem_vals = tf.reshape(mem_vals, [batch_size, mem_length*mem_size])
+        # pad mem_vals to fit the attention_window
+        pad_len = attention_window - mem_length
+        pad_tensor_3 = tf.expand_dims(tf.zeros_like(mem_vals[:, 0, :]), axis=1)
+        pad_tensor_3 = tf.tile(pad_tensor_3, [1, pad_len, 1])
+        mem_vals = tf.concat([mem_vals, pad_tensor_3], axis=1)
+        # flatten the sequence of mem_vals to [batch_size, mem_length*mem_size]
+        mem_vals = tf.reshape(mem_vals, [batch_size, attention_window*mem_size])
         initial_state = (initial_state[0], mem_vals)
         initial_state=tuple(len(cells)*[initial_state])
     if bidirectional:
@@ -206,9 +212,10 @@ def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs, initial_state=None):
 
 class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
-        external_seq_lens=None, keep_prob=1.0, noise_level=0.0, activation_fn=None):
+        external_seq_lens=None, keep_prob=1.0, noise_level=0.0, activation_fn=None,
+        attention_window=32):
         """ """
-        self.attention_window = 33 #TODO make this configurable
+        self.attention_window = attention_window
         super(SelfAttentiveCell, self).__init__()
         self.val_size = val_size
         self.key_size = key_size

@@ -4,6 +4,7 @@ import layers
 def generate_config(keep_prob=1.0, noise_level=0.0):
     char_embed_size = 32
     spell_vector_len = 20
+    max_line_len = 32
 
     word_encoder_mlp = 8*[
        {'num_nodes':512,
@@ -18,7 +19,8 @@ def generate_config(keep_prob=1.0, noise_level=0.0):
         'num_heads':8,
         'keep_prob':keep_prob,
         'noise_level':noise_level,
-        'activation_fn':layers.gelu}]
+        'activation_fn':layers.gelu,
+        'attention_window':max_line_len + 1}] # +1 for STOP word
 
     word_decoder_size = 2*spell_vector_len*char_embed_size
     # project out word embeddings to same size as word_decoder layers
@@ -44,7 +46,7 @@ def generate_config(keep_prob=1.0, noise_level=0.0):
               'char_embed_size':char_embed_size,
               'spell_vector_len':spell_vector_len,
               'max_word_len':19,
-              'max_line_len':33,
+              'max_line_len':max_line_len,
               'keep_prob':keep_prob,
               'noise_level':noise_level,
               'word_encoder_mlp':word_encoder_mlp,
