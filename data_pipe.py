@@ -69,8 +69,8 @@ def _make_file_processor_fn(max_word_len, max_line_len):
     def examples_from_file(filename):
         lines = tf.data.TextLineDataset(filename)
         src = lines.map(_process_line)
-        # TODO: src should be trimmed from the beginning, trg from the end
-        src = src.map(lambda line: sparse_trim(line, max_line_len + 1, max_word_len + 1))
+        src = src.map(lambda line: sparse_trim(line, max_line_len + 1, max_word_len + 1,
+            trim_from_start=True))
         trg = lines.skip(1)
         trg = trg.map(_process_line)
         trg = trg.map(lambda line: sparse_trim(line, max_line_len + 1, max_word_len + 1))
@@ -159,9 +159,20 @@ def create_chr_dicts(dirname, go_stop_token, unk_token, max_num_chrs=None):
 
 #### UTILITIES ####
 
-# Trim a 2D sparse tensor representing a line of text to the dense_shape: [num_words, num_chars]
-def sparse_trim(line, max_line_len, max_word_len):
-    return tf.sparse_slice(line, [0, 0], [max_line_len, max_word_len])
+def sparse_trim(line, max_line_len, max_word_len, trim_from_start=False):
+    """
+    line: a 2D sparse tensor with shape [num_words, num_chars] representence a line of text
+    max_line_len: maximum number of words in the line to trim to
+    max_word_len: maximum number of chars for each word to trim to
+    trim_from_start: whether or not the words should be trimmed from the beginning (not chars)
+    """
+    if trim_from_start:
+        num_words = line.dense_shape[0]
+        start = tf.maximum(tf.constant(0, dtype=num_words.dtype), num_words - max_line_len)
+        size = num_words - start
+        return tf.sparse_slice(line, [start, 0], [size, max_word_len])
+    else:
+        return tf.sparse_slice(line, [0, 0], [max_line_len, max_word_len])
 
 # Get the length of each word from a 3D [batch, sentence, word] tensor of char IDs padded with -1
 def get_word_lens(char_ids_3):
