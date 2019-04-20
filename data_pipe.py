@@ -16,7 +16,7 @@ class Data(object):
         self.chr_to_id = tf.contrib.lookup.index_table_from_tensor(self.id_to_chr)
         # Build pipeline for training and eval
         self.iterator, self.filepattern = make_pipeline(batch_size, max_word_len, max_line_len,
-            self.chr_to_id, cycle_length=1 if eval_mode else len(os.listdir(self.datadir)),
+            self.chr_to_id, cycle_length=1 if eval_mode else min(128, len(os.listdir(self.datadir))),
             shuffle_buffer= 1 if eval_mode else 4096, repeat=not eval_mode)
         (src_vals, src_row_lens), (trg_vals, trg_row_lens) = self.iterator.get_next()
         (self.src,
@@ -116,7 +116,7 @@ def _sparse_batch_to_ragged(batch, batch_size):
     sentence_lens_1 = get_sentence_lens(batch)
     sentence_lens_1 = tf.unstack(sentence_lens_1, num=batch_size, axis=0)
     batch = tf.unstack(batch, num=batch_size, axis=0)
-    # Sentences are by tf.Dataset.map. Trim them here to prevent empty rows in the RaggedTensor
+    # Sentences are padded by tf.Dataset.map. Trim them to prevent empty rows in the RaggedTensor
     batch = [b[:l, :] for b,l in zip(batch, sentence_lens_1)]
     batch = [tf.RaggedTensor.from_tensor(b, padding=-1) for b in batch]
     batch = tf.stack(batch, axis=0)
