@@ -52,8 +52,8 @@ def compute_word_embeds(datadir, restore, wordlist, savepath):
     word_embeds = []
     for words in batched_words:
         words = ' '.join(words) # provide words as one long sentence (workaround to make a single batch)
-        src_word_embeds_3 = sess.run(free_model.src_word_embeds_3, feed_dict={data.src_place:words})
-        src_word_embeds_3 = src_word_embeds_3[0, :-1, :] # Remove batch dim and STOP word
+        src_word_embeds_3 = sess.run(free_model.word_embeds_3, feed_dict={data.trg_place:words})
+        src_word_embeds_3 = src_word_embeds_3[0, 1:, :] # Remove batch dim and GO word
         print src_word_embeds_3.shape
         word_embeds.append(src_word_embeds_3)
     word_embeds = np.concatenate(word_embeds, axis=0)
@@ -65,7 +65,7 @@ def sess_setup(datadir, restore_dir):
     conf = config.generate_config(keep_prob=1.0, noise_level=0)
     data = data_pipe.Data(datadir, conf['batch_size'], conf['max_word_len'],
         conf['max_line_len'])
-    _, free_model = train.build_model(data, conf, shuffle_src=False)
+    _, free_model = train.build_model(data, conf)
     sess = tf.Session()
     saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=1)
     sess.run(tf.tables_initializer())

@@ -20,19 +20,16 @@ parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','
 def parse_bool_arg(arg_str):
     return arg_str == 'yes' or arg_str == 'true'
 
-def build_model(data, conf, reuse=False):
-    with tf.variable_scope('Model', dtype=tf.float32, reuse=reuse) as scope:
-        model = model_def.Model(data.src,
-            data.src_sentence_len,
-            data.trg,
+def build_model(data, conf):
+    with tf.variable_scope('Model', dtype=tf.float32) as scope:
+        model = model_def.Model(data.trg,
             data.trg_sentence_len,
             len(data.id_to_chr),
             conf)
         scope.reuse_variables()
         # Create a copy of the model that operates over the inference pipeline
         conf = config.generate_config(keep_prob=1.0, noise_level=0.0)
-        free_model = model_def.Model(data.src_inference,
-            data.src_sentence_len_inference,
+        free_model = model_def.Model(
             data.trg_inference,
             data.trg_sentence_len_inference,
             len(data.id_to_chr),
@@ -69,36 +66,27 @@ def build_train_op(loss, learn_rate, max_grad_norm):
 def run_inference(model, data, conf, sess):
     paths = [args.datadir + p for p in os.listdir(args.datadir)]
     conditions = data_pipe.getRandomSentence(paths, numSamples=2)
+    conditions.append(['']) # Empty string for no conditioning sentence
     for condition in conditions:
         condition = condition[0].strip()
-        print condition
+        print 'Condition: {}'.format(condition)
         for softmax_temp in [1e-16, 0.75]:
             print softmax_temp
-            # Reconstruct src from encoder representation
-            run_inference_once(model, data, conf, sess, softmax_temp, condition, '')
-            # Run inference for next sentence
-            run_inference_once(model, data, conf, sess, softmax_temp, condition, condition)
+            run_inference_once(model, data, conf, sess, softmax_temp, condition)
         print
 
-def run_inference_once(model, data, conf, sess, softmax_temp, src_condition, trg_condition):
+def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence=''):
     """
-    src_condition: string representing the source sentence
-    trg_condition: string representing the source sentence, or an empty string. The model is
-        trained to first reconstruct the source sentence, then predict the target. Providing
-        the source sentence here allows inference to skip straight to generating the target.
+    condition_sentence: string passed as  initial condition from which model generates next tokens
     """
     # TODO: This is very slow because nearly the entire model is rerun for each char prediction
-    result = trg_condition
+    result = condition_sentence
     char_idx = 0
     word_idx = len(result.split())
     try:
-        # Compute word embeddings for src once, then pass them as placeholder
-        src_word_embeds_3 = sess.run(model.src_word_embeds_3, feed_dict={data.src_place:src_condition})
         # Get chr predictions from the model and feed them back in
         for char_count in range(128):
-            feed = {model.src_word_placeholder_3:src_word_embeds_3,
-                    data.src_place:src_condition,
-                    data.trg_place:result.strip(),
+            feed = {data.trg_place:result.strip(),
                     model.softmax_temp:softmax_temp}
             predictions = sess.run(model.predictions_3, feed_dict=feed)
             next_char = data.id_to_chr[predictions[0, word_idx, char_idx]]
@@ -111,7 +99,7 @@ def run_inference_once(model, data, conf, sess, softmax_temp, src_condition, trg
             else:
                 result += next_char
                 char_idx += 1
-        result = result.replace(trg_condition, '').replace(' {} '.format(data.go_stop_token), ' __ ')
+        result = result.replace(condition_sentence, '').replace(' {} '.format(data.go_stop_token), ' __ ')
         print result
     except Exception as e:
         print 'Inference failed: '

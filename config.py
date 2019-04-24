@@ -20,7 +20,7 @@ def generate_config(keep_prob=1.0, noise_level=0.0):
         'keep_prob':keep_prob,
         'noise_level':noise_level,
         'activation_fn':layers.gelu,
-        'attention_window':max_line_len + 1}] # +1 for STOP word
+        'attention_window':16}]
 
     word_decoder_size = 2*spell_vector_len*char_embed_size
     # project out word embeddings to same size as word_decoder layers
@@ -42,7 +42,7 @@ def generate_config(keep_prob=1.0, noise_level=0.0):
     config = {
               'max_grad_norm':5,
               'learn_rate':1e-4,
-              'batch_size':16,
+              'batch_size':24,
               'char_embed_size':char_embed_size,
               'spell_vector_len':spell_vector_len,
               'max_word_len':19,

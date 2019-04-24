@@ -4,28 +4,18 @@ import layers
 import data_pipe
 
 class Model(object):
-    def __init__(self, src_sentence_3, src_sent_len_1, trg_sentence_3, trg_sent_len_1, num_chars,
-        config, inference_mode=False):
-        src_sentence_3 = src_sentence_3.to_tensor(-1)
-        trg_sentence_3 = trg_sentence_3.to_tensor(-1)
+    def __init__(self, sentences_3, sentence_lens_1, num_chars, config, inference_mode=False):
+        sentences_3 = sentences_3.to_tensor(-1)
         self.config = config
         self.num_chars = num_chars
-        # Embed src words
-        # Shuffle to prevent word order from being infered when they drop off the SARAh's mem array
-        src_sentence_3 = data_pipe.shuffle_words(src_sentence_3, src_sent_len_1)
-        src_word_embeds_3 = self.build_word_encoder(src_sentence_3)
-        if inference_mode:
-            self.src_word_embeds_3 = src_word_embeds_3
-            self.src_word_placeholder_3 = tf.placeholder(name='src_word_embeds_3',
-                dtype=self.src_word_embeds_3.dtype, shape=src_word_embeds_3.shape)
-            src_word_embeds_3 = self.src_word_placeholder_3
-        # Encode target sentence, conditioned on source words
-        trg_sentence_encoded_3 = self.add_go(trg_sentence_3, axis=1)
-        trg_sentence_encoded_3 = self.build_word_encoder(trg_sentence_encoded_3, reuse_vars=True)
-        trg_sentence_encoded_3 = self.build_sentence_encoder(trg_sentence_encoded_3, trg_sent_len_1,
-            src_word_embeds_3, src_sent_len_1, config['sentence_encoder_layers'])
+        # Encode words and
+        sentences_encoded_3 = self.add_go(sentences_3, axis=1)
+        sentences_encoded_3 = self.build_word_encoder(sentences_encoded_3)
+        self.word_embeds_3 = sentences_encoded_3
+        sentences_encoded_3 = self.build_sentence_encoder(sentences_encoded_3, sentence_lens_1,
+            config['sentence_encoder_layers'])
         # Generate target sentence char predictions by decoding word vectors
-        self.out_logits_4 = self.build_word_decoder(trg_sentence_encoded_3, trg_sentence_3)
+        self.out_logits_4 = self.build_word_decoder(sentences_encoded_3, sentences_3)
         # Ops for generating predictions durng inference
         self.softmax_temp = tf.placeholder(self.out_logits_4.dtype, name='softmax_temp', shape=[])
         logits_2 = tf.reshape(self.out_logits_4, [-1, num_chars])
@@ -62,6 +52,7 @@ class Model(object):
 
     def build_word_encoder(self, char_ids_3, reuse_vars=None):
         config = self.config
+        char_ids_3 = char_ids_3[:, :, :config['spell_vector_len']] # potentially trim chars
         with tf.variable_scope('word_encoder', reuse=reuse_vars):
             # Select char embeddings, create fixed-len word-spelling representation
             char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
@@ -73,18 +64,10 @@ class Model(object):
             word_vectors_3 = layers.mlp(spell_vectors_3, config['word_encoder_mlp'])
         return word_vectors_3
 
-    def build_sentence_encoder(self, word_vectors_3, sentence_lens_1, condition_vectors_3,
-        condition_seq_lens_1, layer_specs):
+    def build_sentence_encoder(self, word_vectors_3, sentence_lens_1, layer_specs):
         with tf.variable_scope('sentence_encoder'):
-            # Project the conditioning sequence to the depth of the layer cell. Assuming all layers
-            # are  the same size, this results in one projection instead of one per layer.
-            with tf.variable_scope('project_to_mem_size'):
-                mem_size = layer_specs[0]['val_size'] + layer_specs[0]['key_size']
-                condition_vectors_3 = layers.feed_forward(condition_vectors_3, mem_size)
-                initial_state = (tf.expand_dims(condition_seq_lens_1, axis=1), condition_vectors_3)
             # Build encoder
-            encoded_3 = layers.sarah(word_vectors_3, sentence_lens_1, False, layer_specs,
-                initial_state)
+            encoded_3 = layers.sarah(word_vectors_3, sentence_lens_1, False, layer_specs)
         return encoded_3 # [batch, sentence_len, word_size]
 
     def build_word_decoder(self, word_vectors_3, char_ids_3):

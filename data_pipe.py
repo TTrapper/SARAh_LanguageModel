@@ -25,11 +25,16 @@ class Data(object):
         (self.trg,
          self.trg_sentence_len,
          self.trg_word_len) = _compose_ragged_batch(trg_vals, trg_row_lens)
-        # Model reconstructs the src, then produces trg, so trg is the concatenation of the two.
+        # Model is trained to produce two consecutive lines, so src and trg are concatenated here
+        # TODO: should probably only act on a single line. Whether that line actually contains
+        #   consecutive sentences should be determined during data_prep. Things to consider:
+        #       a) a lot of tests will break
+        #       b) data_pipe currently trims SRC from beginning. Trimming should probably be done
+        #          by data_prep. Potentially leave a safeguard trim in the pipeline.
         self.trg = tf.concat([self.src, self.trg], axis=1)
         self.trg_word_len = tf.concat([self.src_word_len, self.trg_word_len], axis=1)
         self.trg_sentence_len += self.src_sentence_len
-        # Build pipeline for running inference
+        # Build pipeline for running inferenc FIXME remove pipeline for src
         self.src_place, self.trg_place, src, trg = make_inference_pipeline(self.chr_to_id)
         (src_vals, src_row_lens), (trg_vals, trg_row_lens) = (src, trg)
         (self.src_inference, self.src_sentence_len_inference, _) = _compose_ragged_batch(
