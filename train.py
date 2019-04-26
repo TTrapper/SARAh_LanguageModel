@@ -16,6 +16,7 @@ parser.add_argument('--restore', type=str, default=None)
 parser.add_argument('--keep_prob', type=float, default=1.0)
 parser.add_argument('--noise_level', type=float, default=0.0)
 parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'])
+parser.add_argument('--train_words', type=str, default='yes', choices=['yes','no','true','false'])
 
 def parse_bool_arg(arg_str):
     return arg_str == 'yes' or arg_str == 'true'
@@ -56,11 +57,20 @@ def calc_loss(logits, targets, word_lens, sentence_lens):
     loss = tf.reduce_mean(loss) # batch mean
     return loss
 
-def build_train_op(loss, learn_rate, max_grad_norm):
-    tvars = tf.trainable_variables()
-    grads, norm = tf.clip_by_global_norm(tf.gradients(loss, tvars), max_grad_norm)
+def get_vars_to_train(train_words):
+    if train_words:
+        trainable_variables = tf.trainable_variables()
+    else:
+        trainable_variables = [v for v in tf.trainable_variables() if 'word' not in v.name]
+    print 'TRAINED VARIABLES:'
+    for v in trainable_variables:
+        print v
+    return trainable_variables
+
+def build_train_op(loss, learn_rate, max_grad_norm, vars_to_train):
+    grads, norm = tf.clip_by_global_norm(tf.gradients(loss, vars_to_train), max_grad_norm)
     optimizer = tf.train.AdamOptimizer(learn_rate)
-    train_op = optimizer.apply_gradients(zip(grads, tvars))
+    train_op = optimizer.apply_gradients(zip(grads, vars_to_train))
     return train_op, grads, norm
 
 def run_inference(model, data, conf, sess):
@@ -112,13 +122,20 @@ def train():
         conf['max_line_len'], eval_mode=args.eval_mode)
     model, free_model = build_model(data, conf)
     loss = calc_loss(model.out_logits_4, data.trg, data.trg_word_len, data.trg_sentence_len)
-    train_op, grads, norm = build_train_op(loss, conf['learn_rate'], conf['max_grad_norm'])
+    vars_to_train = get_vars_to_train(args.train_words)
+    train_op, grads, norm = build_train_op(loss, conf['learn_rate'], conf['max_grad_norm'],
+        vars_to_train)
     sess = tf.Session()
     saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=1)
     sess.run(tf.tables_initializer())
     sess.run(tf.global_variables_initializer())
     if args.restore is not None:
-        saver.restore(sess, args.restore)
+        restore_vars = tf.trainable_variables()
+        restorer = tf.train.Saver(restore_vars, max_to_keep=1)
+        print 'RESTORED'
+        for v in restore_vars:
+            print v
+        restorer.restore(sess, args.restore)
     data.initialize(sess, data.datadir + '*')
     recent_costs = deque(maxlen=100)
     ops = {'norm':norm, 'loss':loss}
@@ -151,4 +168,5 @@ def train():
 if __name__ == '__main__':
     args = parser.parse_args()
     args.eval_mode = parse_bool_arg(args.eval_mode)
+    args.train_words = parse_bool_arg(args.train_words)
     train()
