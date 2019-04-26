@@ -46,7 +46,7 @@ def get_word_embeds(savename, datadir, vocab, restore):
 
 def compute_word_embeds(datadir, restore, wordlist, savepath):
     print 'computing word embeddings from model: {}'.format(restore)
-    free_model, data, sess = sess_setup(datadir, restore)
+    _, free_model, data, sess = sess_setup(datadir, restore)
     batch_size = 2048
     batched_words = [wordlist[i:i+batch_size] for i in range(0, len(wordlist), batch_size)]
     word_embeds = []
@@ -61,17 +61,18 @@ def compute_word_embeds(datadir, restore, wordlist, savepath):
     np.save(savepath, word_embeds)
     return word_embeds
 
-def sess_setup(datadir, restore_dir):
+def sess_setup(datadir, restore_dir, batch_size=1, single_line_mode=True):
     conf = config.generate_config(keep_prob=1.0, noise_level=0)
-    data = data_pipe.Data(datadir, conf['batch_size'], conf['max_word_len'],
-        conf['max_line_len'])
-    _, free_model = train.build_model(data, conf)
+    data = data_pipe.Data(datadir, batch_size, conf['max_word_len'],
+        conf['max_line_len'], eval_mode=True, single_line_mode=single_line_mode)
+    model, free_model = train.build_model(data, conf)
     sess = tf.Session()
     saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=1)
     sess.run(tf.tables_initializer())
     sess.run(tf.global_variables_initializer())
+    data.initialize(sess, data.datadir + '*')
     saver.restore(sess, restore_dir)
-    return free_model, data, sess
+    return model, free_model, data, sess
 
 def project_embeds(savename, embeds):
     project_file = '{}.projected.npy'.format(savename)

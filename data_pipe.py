@@ -7,7 +7,7 @@ import tensorflow as tf
 
 class Data(object):
     def __init__(self, datadir, batch_size, max_word_len, max_line_len, go_stop_token=chr(0),
-        eval_mode=False):
+        eval_mode=False, single_line_mode=False):
         """ """
         self.datadir = datadir
         self.go_stop_token = go_stop_token
@@ -31,9 +31,10 @@ class Data(object):
         #       a) a lot of tests will break
         #       b) data_pipe currently trims SRC from beginning. Trimming should probably be done
         #          by data_prep. Potentially leave a safeguard trim in the pipeline.
-        self.trg = tf.concat([self.src, self.trg], axis=1)
-        self.trg_word_len = tf.concat([self.src_word_len, self.trg_word_len], axis=1)
-        self.trg_sentence_len += self.src_sentence_len
+        if not single_line_mode:
+            self.trg = tf.concat([self.src, self.trg], axis=1)
+            self.trg_word_len = tf.concat([self.src_word_len, self.trg_word_len], axis=1)
+            self.trg_sentence_len += self.src_sentence_len
         # Build pipeline for running inferenc FIXME remove pipeline for src
         self.src_place, self.trg_place, src, trg = make_inference_pipeline(self.chr_to_id)
         (src_vals, src_row_lens), (trg_vals, trg_row_lens) = (src, trg)
@@ -45,9 +46,13 @@ class Data(object):
     def initialize(self, sess, filepattern):
         sess.run(self.iterator.initializer, feed_dict={self.filepattern:filepattern})
 
-    def array_to_strings(self, array_3):
-        return [' '.join([''.join([self.id_to_chr[c] for c in word if c != -1])
+    def array_to_strings(self, array_3, remove_stops=False):
+        sentences = [' '.join([''.join([self.id_to_chr[c] for c in word if c != -1])
             for word in sentence]) for sentence in array_3]
+        if remove_stops:
+            sentences = [s.replace(self.go_stop_token, '') for s in sentences]
+        return sentences
+
 
 
 def make_pipeline(batch_size, max_word_len, max_line_len, chr_to_id, cycle_length=128,
@@ -63,7 +68,7 @@ def make_pipeline(batch_size, max_word_len, max_line_len, chr_to_id, cycle_lengt
     pair = filepaths.apply(tf.contrib.data.parallel_interleave(# TODO try tf.data.experimental.sample_from_datasets
         file_processor, sloppy=sloppy, cycle_length=cycle_length))
     pair = pair.shuffle(shuffle_buffer)
-    pair = pair.batch(batch_size) # NOTE: expands non-concat dim. Complicates sparse_batch_to_ragged
+    pair = pair.batch(batch_size, drop_remainder=True) # NOTE: expands non-concat dim. Complicates sparse_batch_to_ragged
     pair = pair.map(lambda *batches: tuple([chr_to_id.lookup(b) for b in batches]))
     pair = pair.map(lambda *batches: tuple([_sparse_batch_to_ragged(b, batch_size) for b in batches]))
     pair = pair.prefetch(64) # TODO: try tf.data.experimental.prefetch_to_device
