@@ -14,6 +14,9 @@ class Model(object):
         self.word_embeds_3 = sentences_encoded_3
         sentences_encoded_3 = self.build_sentence_encoder(sentences_encoded_3, sentence_lens_1,
             config['sentence_encoder_layers'])
+        sentence_lens_2 = tf.expand_dims(sentence_lens_1, axis=1)
+        sentence_lens_2 = tf.cast(sentence_lens_2, sentences_encoded_3.dtype)
+        self.sentence_embeds_2 = tf.reduce_sum(sentences_encoded_3, axis=1)/sentence_lens_2
         # Generate target sentence char predictions by decoding word vectors
         self.out_logits_4 = self.build_word_decoder(sentences_encoded_3, sentences_3)
         # Ops for generating predictions durng inference
