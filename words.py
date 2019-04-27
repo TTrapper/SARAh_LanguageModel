@@ -80,7 +80,7 @@ def project_embeds(savename, embeds):
         print 'loading precomputed embedding projections: {}'.format(project_file)
         projected_embeds = np.load(project_file)
     else:
-        print 'projecting word embeds'
+        print 'projecting embeds'
         projected_embeds = umap.UMAP().fit_transform(embeds)
         np.save(project_file, projected_embeds)
     return projected_embeds
