@@ -19,6 +19,7 @@ parser.add_argument('--noise_level', type=float, default=0.0)
 parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'])
 parser.add_argument('--single_line', type=str, default='no', choices=['yes','no','true','false'])
 parser.add_argument('--train_words', type=str, default='yes', choices=['yes','no','true','false'])
+parser.add_argument('--inference_mode', type=str, default='no', choices=['yes','no','true','false'])
 
 def parse_bool_arg(arg_str):
     return arg_str == 'yes' or arg_str == 'true'
@@ -83,7 +84,7 @@ def run_inference(model, data, conf, sess):
     for condition in conditions:
         condition = condition[0].strip()
         print 'Condition: {}'.format(condition)
-        for softmax_temp in [1e-16, 0.75]:
+        for softmax_temp in [1e-16, 0.25, 0.5, 0.75]:
             print softmax_temp
             run_inference_once(model, data, conf, sess, softmax_temp, condition)
         print
@@ -96,13 +97,13 @@ def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence
     result = condition_sentence
     char_idx = 0
     word_idx = len(result.split())
+    result += ' ' # the first prediction always starts a new word because of the appended GO word
     try:
         # Get chr predictions from the model and feed them back in
         for char_count in range(128):
             feed = {data.trg_place:result.strip(),
                     model.softmax_temp:softmax_temp}
             predictions = sess.run(model.predictions_3, feed_dict=feed)
-            word_idx = min(word_idx, predictions.shape[1] - 1)
             next_char = data.id_to_chr[predictions[0, word_idx, char_idx]]
             if next_char == data.go_stop_token:
                 if char_idx == 0: # EOS
@@ -140,6 +141,9 @@ def train():
         for v in restore_vars:
             print v
         restorer.restore(sess, args.restore)
+    if args.inference_mode:
+        run_inference(free_model, data, conf, sess)
+        exit()
     data.initialize(sess, data.datadir + '*')
     recent_costs = deque(maxlen=100)
     ops = {'norm':norm, 'loss':loss}
@@ -174,4 +178,5 @@ if __name__ == '__main__':
     args.eval_mode = parse_bool_arg(args.eval_mode)
     args.single_line = parse_bool_arg(args.single_line)
     args.train_words = parse_bool_arg(args.train_words)
+    args.inference_mode = parse_bool_arg(args.inference_mode)
     train()
