@@ -12,10 +12,12 @@ import config
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', type=str, required=True)
+parser.add_argument('--inference_dir', type=str, default=None)
 parser.add_argument('--restore', type=str, default=None)
 parser.add_argument('--keep_prob', type=float, default=1.0)
 parser.add_argument('--noise_level', type=float, default=0.0)
 parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'])
+parser.add_argument('--single_line', type=str, default='no', choices=['yes','no','true','false'])
 parser.add_argument('--train_words', type=str, default='yes', choices=['yes','no','true','false'])
 
 def parse_bool_arg(arg_str):
@@ -74,7 +76,8 @@ def build_train_op(loss, learn_rate, max_grad_norm, vars_to_train):
     return train_op, grads, norm
 
 def run_inference(model, data, conf, sess):
-    paths = [args.datadir + p for p in os.listdir(args.datadir)]
+    inference_dir = args.datadir if args.inference_dir is None else args.inference_dir
+    paths = ['{}/{}'.format(inference_dir, p) for p in os.listdir(inference_dir)]
     conditions = data_pipe.getRandomSentence(paths, numSamples=2)
     conditions.append(['']) # Empty string for no conditioning sentence
     for condition in conditions:
@@ -99,6 +102,7 @@ def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence
             feed = {data.trg_place:result.strip(),
                     model.softmax_temp:softmax_temp}
             predictions = sess.run(model.predictions_3, feed_dict=feed)
+            word_idx = min(word_idx, predictions.shape[1] - 1)
             next_char = data.id_to_chr[predictions[0, word_idx, char_idx]]
             if next_char == data.go_stop_token:
                 if char_idx == 0: # EOS
@@ -119,7 +123,7 @@ def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence
 def train():
     conf = config.generate_config(args.keep_prob, args.noise_level)
     data = data_pipe.Data(args.datadir, conf['batch_size'], conf['max_word_len'],
-        conf['max_line_len'], eval_mode=args.eval_mode)
+        conf['max_line_len'], eval_mode=args.eval_mode, single_line_mode=args.single_line)
     model, free_model = build_model(data, conf)
     loss = calc_loss(model.out_logits_4, data.trg, data.trg_word_len, data.trg_sentence_len)
     vars_to_train = get_vars_to_train(args.train_words)
@@ -168,5 +172,6 @@ def train():
 if __name__ == '__main__':
     args = parser.parse_args()
     args.eval_mode = parse_bool_arg(args.eval_mode)
+    args.single_line = parse_bool_arg(args.single_line)
     args.train_words = parse_bool_arg(args.train_words)
     train()

@@ -15,6 +15,8 @@ class Data(object):
         self.id_to_chr = [chr(i) for i in range(256)]
         self.chr_to_id = tf.contrib.lookup.index_table_from_tensor(self.id_to_chr)
         # Build pipeline for training and eval
+        if single_line_mode:
+            max_line_len *= 2
         self.iterator, self.filepattern = make_pipeline(batch_size, max_word_len, max_line_len,
             self.chr_to_id, cycle_length=1 if eval_mode else min(128, len(os.listdir(self.datadir))),
             shuffle_buffer= 1 if eval_mode else 4096, repeat=not eval_mode)
