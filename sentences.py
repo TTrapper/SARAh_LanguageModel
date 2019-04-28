@@ -3,6 +3,7 @@ import os
 import sys
 import random
 
+from sklearn.metrics import pairwise_distances
 from gensim.models import KeyedVectors
 import numpy as np
 import tensorflow as tf
@@ -13,6 +14,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', type=str, required=True)
 parser.add_argument('--restore', type=str, required=True)
 parser.add_argument('--savename', type=str, default='./embeded_sentences')
+parser.add_argument('--write_examples', type=str, default='no', choices=['yes', 'no'])
 
 def get_sentence_embeds(savename, datadir, restore):
     embed_file = '{}.embeds.npy'.format(savename)
@@ -20,6 +22,7 @@ def get_sentence_embeds(savename, datadir, restore):
         print 'loading precomputed embeddings: {}'.format(embed_file)
         sentence_embeds = np.load(embed_file)
         labels = open('{}.labels'.format(savename)).readlines()
+        labels = [l.strip() for l in labels]
         return sentence_embeds, labels
     sentence_embeds, labels = compute_sentence_embeds(datadir, restore, savename)
     return sentence_embeds, labels
@@ -50,41 +53,82 @@ def compute_sentence_embeds(datadir, restore, savename):
     print embeds.shape
     np.save('{}.embeds.npy'.format(savename), embeds)
     with open('{}.labels'.format(savename), 'w') as label_file:
-        label_file.writelines(labels)
+        label_file.write('\n'.join(labels))
     return embeds, labels
 
-    sentence_embeds = []
-    sentence_labels = []
-    for filename in os.listdir(datadir):
-        sentences = open('{}/{}'.format(datadir, filename)).readlines()
-        sentence_labels.extend(sentences)
-        for batch_num, sentence in sentences:
-            sentence_embeds_2 = sess.run(free_model.sentence_embeds_2, feed_dict={data.trg_place:sentence})
-            sentence_embeds.append(sentence_embeds_2)
-            if len(sentence_embeds) % 1000 == 1:
-                print len(sentence_embeds)
-    sentence_embeds = np.concatenate(sentence_embeds, axis=0)
-    print sentence_embeds.shape
-    np.save('{}.embeds.npy'.format(savename), sentence_embeds)
-    with open('{}.labels'.format(savename), 'w') as label_file:
-        label_file.writelines(sentence_labels)
-    return sentence_embeds, sentence_labels
+def get_paraphrases(embeds, labels, min_distant=1, max_distance=9):
+    """
+    experimental - finds pairs of sentences whose distance falls within a given range. The hope is
+    to filter for pairs that have a minimum level of semantic similarity yet arent duplicates.
+    But sometimes the spatially closest sentence is not the best semantic match.
+    """
+    for label, vector in zip(labels, embeds):
+        dists = pairwise_distances([vector], embeds, 'euclidean')[0]
+        dists[np.argmin(dists)] = np.inf # nearest should be itself, replace it to get next-nearest
+        if np.min(dists) < max_distance and np.min(dists) > min_distant:
+            print dists[np.argmin(dists)]
+            print label
+            print labels[np.argmin(dists)]
+            print '--------------------------------------------------'
+    return
 
-def show_similar(embeds, labels):
+def make_similars_examples(embeds, labels, n_nearby, savename):
+    """
+    Runs through each sentence in labels and finds the n_nearby closest sentences, writing each
+    pair to a file that can be used as a set of examples for training. Each line of the file
+    contains a pair of similar sentences separated by: '|SEP|'
+    """
+    filename = '{}.similars'.format(savename)
+    print 'Writing examples to file: {}'.format(filename)
+    with open(filename, 'w') as out_file:
+        for num_processed, query_sentence in enumerate(labels):
+            index = labels.index(query_sentence)
+            vector = embeds[index, :]
+            dists = pairwise_distances([vector], embeds, 'euclidean')[0]
+            # try to skip all of the duplicates by removing the really short distances
+            dists = [d if d > 1.0 else np.inf for d in dists]
+            for _ in range(n_nearby):
+                idx = np.argmin(dists)
+                dist = dists[idx]
+                close_sentence = labels[idx]
+                out_file.write('{} |SEP| {}\n'.format(query_sentence, close_sentence))
+                dists[np.argmin(dists)] = np.inf # replace this dist with inf before next iteration
+            if num_processed % 500 == 0:
+                print '{} lines processed'.format(num_processed + 1)
+                sys.stdout.flush()
+
+def show_similar(embeds, label, n_examples=100, n_nearby=4):
+    for query_sentence in random.sample(labels, n_examples):
+        index = labels.index(query_sentence)
+        print index, query_sentence
+        vector = embeds[index, :]
+        dists = pairwise_distances([vector], embeds, 'euclidean')[0]
+        for _ in range(n_nearby):
+            idx = np.argmin(dists)
+            dist = dists[idx]
+            close_sentence = labels[idx]
+            print dist, close_sentence
+            dists[np.argmin(dists)] = np.inf # replace closest with inf to get next-nearest
+        print '--------------------------------------------------'
+    return
+
+    # TODO: gensim is much faster but something is off with the results
     kv = KeyedVectors(embeds.shape[-1])
     kv.add(labels, embeds)
-    random_labels = random.sample(labels, 100)
+    random_labels = random.sample(labels, 10)
     for label in random_labels:
         print label
-        for (distance, sentence) in kv.most_similar(label):
-            print distance, sentence
+        for tup in kv.most_similar(label):
+            print tup
         print '--------------------------------------------------'
 
 if __name__ == '__main__':
     args = parser.parse_args()
+    args.write_examples = args.write_examples == 'yes'
     sentence_embeds, labels = get_sentence_embeds(args.savename, args.datadir, args.restore)
     projected_embeds = words.project_embeds(args.savename, sentence_embeds)
     words.plot_projections(projected_embeds, labels, args.savename)
     show_similar(sentence_embeds, labels)
-
+    if args.write_examples:
+        make_similars_examples(sentence_embeds, labels, n_nearby=2, savename=args.savename)
 
