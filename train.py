@@ -62,13 +62,14 @@ def calc_loss(logits, targets, word_lens, sentence_lens):
 
 def get_vars_to_train(train_words):
     if train_words:
-        trainable_variables = tf.trainable_variables()
+        trained_variables = tf.trainable_variables()
     else:
-        trainable_variables = [v for v in tf.trainable_variables() if 'word' not in v.name]
-    print 'TRAINED VARIABLES:'
-    for v in trainable_variables:
-        print v
-    return trainable_variables
+        trained_variables = [v for v in tf.trainable_variables() if 'word' not in v.name]
+    print 'NOT-TRAINED VARIABLES:'
+    for v in tf.trainable_variables():
+        if v not in trained_variables:
+            print v
+    return trained_variables
 
 def build_train_op(loss, learn_rate, max_grad_norm, vars_to_train):
     grads, norm = tf.clip_by_global_norm(tf.gradients(loss, vars_to_train), max_grad_norm)
@@ -138,9 +139,10 @@ def train():
     if args.restore is not None:
         restore_vars = tf.trainable_variables()
         restorer = tf.train.Saver(restore_vars, max_to_keep=1)
-        print 'RESTORED'
-        for v in restore_vars:
-            print v
+        print 'NOT-RESTORED VARIABLES:'
+        for v in tf.trainable_variables():
+            if v not in restore_vars:
+                print v
         restorer.restore(sess, args.restore)
     if args.inference_mode:
         run_inference(free_model, data, conf, sess)
