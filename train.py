@@ -115,9 +115,11 @@ def run_word_decode(model, data, sess, word_vectors_2, softmax_temp, max_word_le
         feed[data.trg_place] = word
         predictions = sess.run(model.predictions_3, feed_dict=feed)
         next_char = data.id_to_chr[predictions[0, 0, char_idx]]
-        word += next_char
         if next_char == data.go_stop_token: # End of word
+            if char_idx == 0: # End of sentence
+                word += next_char
             break
+        word += next_char
     return word
 
 def train():
