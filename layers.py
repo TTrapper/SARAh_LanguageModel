@@ -268,13 +268,13 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
             query = inputs[:, -self.key_size:] # not the same query used for internal mem
             context += self._attend_to_external(query)
         value += context
-        if self.noise_level > 0.0:
-            value += gaussian_noise(value, self.noise_level)
         output = tf.matmul(value, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
         output = do_layer_norm(output)
         if self.activation_fn is not None:
             output = self.activation_fn(output)
+        if self.noise_level > 0.0:
+            output += gaussian_noise(output, self.noise_level)
         # Extract new mem val and add it to memory. Values are added to the beggining to align with
         # sequence masking during attention. This means that memory is in reverse order.
         new_mem_val = tf.expand_dims(output[:, :self.mem_size], axis=1)
