@@ -86,7 +86,7 @@ def project_embeds(savename, embeds):
     return projected_embeds
 
 def plot_projections(projection, labels, outfile):
-    projection, labels = projection, labels
+    labels = [l.decode('utf-8', 'ignore') for l in labels]
     # output to static HTML file
     output_file('{}.projected.html'.format(outfile))
 
