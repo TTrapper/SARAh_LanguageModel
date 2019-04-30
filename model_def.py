@@ -51,18 +51,47 @@ class Model(object):
             spell_vectors_3 = tf.reshape(spell_vectors_3, [-1,  max_sentence_len, spell_vector_size])
         return spell_vectors_3
 
+    def build_positional_char_embeds(self, char_ids_3, char_embed_size, mlp_layer_specs):
+        """ """
+        batch_size, max_sentence_len, max_word_len = tf.unstack(tf.shape(char_ids_3))
+        # Select char embeddings
+        with tf.variable_scope('chars'):
+            char_embeds_4 = layers.embedding(self.num_chars, char_embed_size, char_ids_3)
+        # Create char position ids for every possible char position in the batch (including padding)
+        position_ids_1 = tf.range(max_word_len)
+        position_ids_3 = tf.expand_dims(tf.expand_dims(position_ids_1, 0), 0)
+        position_ids_3 = tf.tile(position_ids_3, [batch_size, max_sentence_len, 1])
+        # Mask position_ids for padding chars
+        where = tf.equal(char_ids_3, -1)
+        position_ids_3 = tf.where(where, char_ids_3, tf.cast(position_ids_3, char_ids_3.dtype))
+        # Convert position_ids to relative position (scalar between 0 and 1)
+        word_lengths_3 = tf.reduce_max(position_ids_3, axis=2, keep_dims=True)
+        word_lengths_3 = tf.where(tf.equal(word_lengths_3, 0), tf.ones_like(word_lengths_3), word_lengths_3)
+        word_lengths_3 = tf.cast(word_lengths_3, char_embeds_4.dtype)
+        position_ids_3 = tf.cast(position_ids_3, char_embeds_4.dtype)
+        relative_positions_3 = position_ids_3 / word_lengths_3
+        # Mask relative_positions for padding chars
+        relative_positions_3 = tf.where(where, tf.zeros_like(relative_positions_3), relative_positions_3)
+        # Combine char embeddings with their respective positions
+        relative_positions_4 = tf.expand_dims(relative_positions_3, axis=3)
+        positional_char_embeds_4 = tf.concat([char_embeds_4, relative_positions_4], axis=3)
+        positional_char_embeds_4 = layers.mlp(positional_char_embeds_4, mlp_layer_specs)
+        return positional_char_embeds_4
+
     def build_word_encoder(self, char_ids_3, reuse_vars=None):
         config = self.config
-        char_ids_3 = char_ids_3[:, :, :config['spell_vector_len']] # potentially trim chars
+        with tf.variable_scope('char_encoder', reuse=reuse_vars):
+            char_embeds_4 = self.build_positional_char_embeds(char_ids_3, config['char_embed_size'],
+                config['char_encoder_mlp'])
         with tf.variable_scope('word_encoder', reuse=reuse_vars):
-            # Select char embeddings, create fixed-len word-spelling representation
-            char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
-            spell_vectors_3 = self.create_spell_vector(char_embeds_4, config['spell_vector_len'])
-            with tf.variable_scope('project_spell_vec'):
-                project_size = config['word_encoder_mlp'][-1]['num_nodes']
-                spell_vectors_3 = layers.feed_forward(spell_vectors_3, project_size)
-            # Send spelling-vectors through MLP
-            word_vectors_3 = layers.mlp(spell_vectors_3, config['word_encoder_mlp'])
+            # Sum positional_char_embeds to get a word_vector, normalize and noise it.
+            word_vectors_3 = layers.do_layer_norm(tf.reduce_sum(char_embeds_4, axis=2))
+            shape_1 = tf.shape(word_vectors_3)
+            word_vectors_2 = tf.reshape(word_vectors_3, [-1, shape_1[-1]])
+            word_vectors_2 += layers.gaussian_noise(word_vectors_2, self.config['noise_level'])
+            word_vectors_3 = tf.reshape(word_vectors_2, shape_1)
+            # Pass word_vectors through an MLP
+            word_vectors_3 = layers.mlp(word_vectors_3, config['word_encoder_mlp'])
         return word_vectors_3
 
     def build_sentence_encoder(self, word_vectors_3, sentence_lens_1, layer_specs):

@@ -6,6 +6,13 @@ def generate_config(keep_prob=1.0, noise_level=0.0):
     spell_vector_len = 20
     max_line_len = 32
 
+    char_encoder_mlp = 1*[
+       {'num_nodes': 512,
+        'activation_fn':layers.gelu,
+        'layer_norm':True,
+        'keep_prob':keep_prob,
+        'noise_level':0.0}]
+
     word_encoder_mlp = 8*[
        {'num_nodes':512,
         'activation_fn':layers.gelu,
@@ -49,6 +56,7 @@ def generate_config(keep_prob=1.0, noise_level=0.0):
               'max_line_len':max_line_len,
               'keep_prob':keep_prob,
               'noise_level':noise_level,
+              'char_encoder_mlp':char_encoder_mlp,
               'word_encoder_mlp':word_encoder_mlp,
               'sentence_encoder_layers':sentence_encoder_layers,
               'sentence_decoder_projection':sentence_decoder_projection,
