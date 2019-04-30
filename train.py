@@ -79,8 +79,7 @@ def build_train_op(loss, learn_rate, max_grad_norm, vars_to_train):
 def run_inference(model, data, conf, sess):
     inference_dir = args.datadir if args.inference_dir is None else args.inference_dir
     paths = ['{}/{}'.format(inference_dir, p) for p in os.listdir(inference_dir)]
-    conditions = data_pipe.getRandomSentence(paths, numSamples=2)
-    conditions.append(['']) # Empty string for no conditioning sentence
+    conditions = data_pipe.getRandomSentence(paths, numSamples=3)
     for condition in conditions:
         condition = condition[0].strip()
         print 'Condition: {}'.format(condition)
@@ -93,33 +92,33 @@ def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence
     """
     condition_sentence: string passed as  initial condition from which model generates next tokens
     """
-    # TODO: This is very slow because nearly the entire model is rerun for each char prediction
-    result = condition_sentence
-    char_idx = 0
-    word_idx = len(result.split())
-    result += ' ' # the first prediction always starts a new word because of the appended GO word
+    result = condition_sentence.strip()
     try:
-        # Get chr predictions from the model and feed them back in
-        for char_count in range(128):
-            feed = {data.trg_place:result.strip(),
-                    model.softmax_temp:softmax_temp}
-            predictions = sess.run(model.predictions_3, feed_dict=feed)
-            next_char = data.id_to_chr[predictions[0, word_idx, char_idx]]
-            if next_char == data.go_stop_token:
-                if char_idx == 0: # EOS
-                    result += ' ' + data.go_stop_token
-                result += ' '
-                word_idx += 1
-                char_idx = 0
-            else:
-                result += next_char
-                char_idx += 1
-        result = result.replace(condition_sentence, '').replace(' {} '.format(data.go_stop_token), ' __ ')
-        print result
+        for word_idx in range(32):
+            feed = {data.trg_place:result}
+            # TODO: Re-running the sentence encoder over the entire history of words is wasteful
+            sentences_encoded_3 = sess.run(model.sentences_encoded_checkpoint_3, feed_dict=feed)
+            word_vectors_2 = sentences_encoded_3[:, -1, :]
+            next_word = run_word_decode(model, data, sess, word_vectors_2, softmax_temp,
+                conf['max_word_len'])
+            result += ' ' + next_word
     except Exception as e:
-        print 'Inference failed: '
         print e
-        print result
+    result = result.replace(condition_sentence, '').replace(' {} '.format(data.go_stop_token), ' __ ')
+    print result
+
+def run_word_decode(model, data, sess, word_vectors_2, softmax_temp, max_word_len):
+    word = ''
+    feed = {model.sentences_encoded_placeholder_3:np.expand_dims(word_vectors_2, axis=1),
+            model.softmax_temp:softmax_temp}
+    for char_idx in range(max_word_len):
+        feed[data.trg_place] = word
+        predictions = sess.run(model.predictions_3, feed_dict=feed)
+        next_char = data.id_to_chr[predictions[0, 0, char_idx]]
+        word += next_char
+        if next_char == data.go_stop_token: # End of word
+            break
+    return word
 
 def train():
     conf = config.generate_config(args.keep_prob, args.noise_level)
