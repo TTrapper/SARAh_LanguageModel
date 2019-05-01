@@ -8,7 +8,7 @@ from nltk.tokenize.punkt import PunktSentenceTokenizer
 parser = argparse.ArgumentParser()
 parser.add_argument('--src', type=str, required=True)
 parser.add_argument('--dst', type=str, required=True)
-parser.add_argument('--seq_len', type=int, default=32)
+parser.add_argument('--seq_len', type=int, default=64)
 parser.add_argument('--parse_sentences', type=str, choices=['yes', 'no'], default='no')
 parser.add_argument('--autoencode', type=str, choices=['yes', 'no'], default='no')
 parser.add_argument('--go_stop_chr', type=str, default=chr(0))
