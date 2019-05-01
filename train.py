@@ -17,7 +17,6 @@ parser.add_argument('--restore', type=str, default=None)
 parser.add_argument('--keep_prob', type=float, default=1.0)
 parser.add_argument('--noise_level', type=float, default=0.0)
 parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'])
-parser.add_argument('--single_line', type=str, default='no', choices=['yes','no','true','false'])
 parser.add_argument('--train_words', type=str, default='yes', choices=['yes','no','true','false'])
 parser.add_argument('--inference_mode', type=str, default='no', choices=['yes','no','true','false'])
 
@@ -126,7 +125,7 @@ def run_word_decode(model, data, sess, word_vectors_2, softmax_temp, max_word_le
 def train():
     conf = config.generate_config(args.keep_prob, args.noise_level)
     data = data_pipe.Data(args.datadir, conf['batch_size'], conf['max_word_len'],
-        conf['max_line_len'], eval_mode=args.eval_mode, single_line_mode=args.single_line)
+        conf['max_line_len'], eval_mode=args.eval_mode)
     model, free_model = build_model(data, conf)
     loss = calc_loss(model.out_logits_4, data.trg, data.trg_word_len, data.trg_sentence_len)
     vars_to_train = get_vars_to_train(args.train_words)
@@ -179,7 +178,6 @@ def train():
 if __name__ == '__main__':
     args = parser.parse_args()
     args.eval_mode = parse_bool_arg(args.eval_mode)
-    args.single_line = parse_bool_arg(args.single_line)
     args.train_words = parse_bool_arg(args.train_words)
     args.inference_mode = parse_bool_arg(args.inference_mode)
     train()

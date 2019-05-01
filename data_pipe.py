@@ -7,7 +7,7 @@ import tensorflow as tf
 
 class Data(object):
     def __init__(self, datadir, batch_size, max_word_len, max_line_len, go_stop_token=chr(0),
-        eval_mode=False, single_line_mode=False):
+        eval_mode=False):
         """ """
         self.datadir = datadir
         self.go_stop_token = go_stop_token
@@ -15,33 +15,16 @@ class Data(object):
         self.id_to_chr = [chr(i) for i in range(256)]
         self.chr_to_id = tf.contrib.lookup.index_table_from_tensor(self.id_to_chr)
         # Build pipeline for training and eval
-        if single_line_mode:
-            max_line_len *= 2
         self.iterator, self.filepattern = make_pipeline(batch_size, max_word_len, max_line_len,
             self.chr_to_id, cycle_length=1 if eval_mode else min(128, len(os.listdir(self.datadir))),
             shuffle_buffer= 1 if eval_mode else 4096, repeat=not eval_mode)
-        (src_vals, src_row_lens), (trg_vals, trg_row_lens) = self.iterator.get_next()
-        (self.src,
-         self.src_sentence_len,
-         self.src_word_len) = _compose_ragged_batch(src_vals, src_row_lens)
+        (trg_vals, trg_row_lens) = self.iterator.get_next()
         (self.trg,
          self.trg_sentence_len,
          self.trg_word_len) = _compose_ragged_batch(trg_vals, trg_row_lens)
-        # Model is trained to produce two consecutive lines, so src and trg are concatenated here
-        # TODO: should probably only act on a single line. Whether that line actually contains
-        #   consecutive sentences should be determined during data_prep. Things to consider:
-        #       a) a lot of tests will break
-        #       b) data_pipe currently trims SRC from beginning. Trimming should probably be done
-        #          by data_prep. Potentially leave a safeguard trim in the pipeline.
-        if not single_line_mode:
-            self.trg = tf.concat([self.src, self.trg], axis=1)
-            self.trg_word_len = tf.concat([self.src_word_len, self.trg_word_len], axis=1)
-            self.trg_sentence_len += self.src_sentence_len
-        # Build pipeline for running inferenc FIXME remove pipeline for src
-        self.src_place, self.trg_place, src, trg = make_inference_pipeline(self.chr_to_id)
-        (src_vals, src_row_lens), (trg_vals, trg_row_lens) = (src, trg)
-        (self.src_inference, self.src_sentence_len_inference, _) = _compose_ragged_batch(
-            src_vals, src_row_lens)
+        # Build pipeline for running inferenc
+        self.trg_place, trg = make_inference_pipeline(self.chr_to_id)
+        (trg_vals, trg_row_lens) = trg
         (self.trg_inference, self.trg_sentence_len_inference, _) = _compose_ragged_batch(
             trg_vals, trg_row_lens)
 
@@ -67,27 +50,22 @@ def make_pipeline(batch_size, max_word_len, max_line_len, chr_to_id, cycle_lengt
     if repeat: # TODO try tf.data.experimental.shuffle_and_repeat(
         filepaths = filepaths.repeat()
     file_processor = _make_file_processor_fn(max_word_len, max_line_len)
-    pair = filepaths.apply(tf.contrib.data.parallel_interleave(# TODO try tf.data.experimental.sample_from_datasets
+    lines = filepaths.apply(tf.contrib.data.parallel_interleave(# TODO try tf.data.experimental.sample_from_datasets
         file_processor, sloppy=sloppy, cycle_length=cycle_length))
-    pair = pair.shuffle(shuffle_buffer)
-    pair = pair.batch(batch_size, drop_remainder=True) # NOTE: expands non-concat dim. Complicates sparse_batch_to_ragged
-    pair = pair.map(lambda *batches: tuple([chr_to_id.lookup(b) for b in batches]))
-    pair = pair.map(lambda *batches: tuple([_sparse_batch_to_ragged(b, batch_size) for b in batches]))
-    pair = pair.prefetch(64) # TODO: try tf.data.experimental.prefetch_to_device
-    iterator = pair.make_initializable_iterator()
+    lines = lines.shuffle(shuffle_buffer)
+    lines = lines.batch(batch_size, drop_remainder=True) # NOTE: expands non-concat dim. Complicates sparse_batch_to_ragged
+    lines = lines.map(lambda batch: chr_to_id.lookup(batch))
+    lines = lines.map(lambda batch: _sparse_batch_to_ragged(batch, batch_size))
+    lines = lines.prefetch(64) # TODO: try tf.data.experimental.prefetch_to_device
+    iterator = lines.make_initializable_iterator()
     return iterator, filepattern
 
 def _make_file_processor_fn(max_word_len, max_line_len):
     def examples_from_file(filename):
         lines = tf.data.TextLineDataset(filename)
-        src = lines.map(_process_line)
-        src = src.map(lambda line: sparse_trim(line, max_line_len + 1, max_word_len + 1,
-            trim_from_start=True))
-        trg = lines.skip(1)
-        trg = trg.map(_process_line)
-        trg = trg.map(lambda line: sparse_trim(line, max_line_len + 1, max_word_len + 1))
-        pair = tf.data.Dataset.zip((src, trg))
-        return pair
+        lines = lines.map(_process_line)
+        lines = lines.map(lambda line: sparse_trim(line, max_line_len + 1, max_word_len + 1))
+        return lines
     return examples_from_file
 
 def _process_line(line):
@@ -142,17 +120,12 @@ def _compose_ragged_batch(flat_values, nested_row_lengths):
     return rag, rag_sentence_len, rag_word_len
 
 def make_inference_pipeline(chr_to_id):
-    src_place = tf.placeholder(dtype=tf.string, name='src_place')
     trg_place = tf.placeholder(dtype=tf.string, name='trg_place')
-    src = _process_line(src_place)
-    src = tf.sparse.expand_dims(src, 0)
-    src = chr_to_id.lookup(src)
-    src = _sparse_batch_to_ragged(src, 1)
     trg = _process_line(trg_place)
     trg = tf.sparse.expand_dims(trg, 0)
     trg = chr_to_id.lookup(trg)
     trg = _sparse_batch_to_ragged(trg, 1)
-    return src_place, trg_place, src, trg
+    return trg_place, trg
 
 def create_chr_dicts(dirname, go_stop_token, unk_token, max_num_chrs=None):
     chr_to_freq = None
