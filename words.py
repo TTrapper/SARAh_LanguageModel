@@ -61,10 +61,10 @@ def compute_word_embeds(datadir, restore, wordlist, savepath):
     np.save(savepath, word_embeds)
     return word_embeds
 
-def sess_setup(datadir, restore_dir, batch_size=1, single_line_mode=True):
+def sess_setup(datadir, restore_dir, batch_size=1):
     conf = config.generate_config(keep_prob=1.0, noise_level=0)
     data = data_pipe.Data(datadir, batch_size, conf['max_word_len'],
-        conf['max_line_len'], eval_mode=True, single_line_mode=single_line_mode)
+        conf['max_line_len'], eval_mode=True)
     model, free_model = train.build_model(data, conf)
     sess = tf.Session()
     saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=1)
