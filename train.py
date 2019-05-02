@@ -82,7 +82,12 @@ def run_inference(model, data, conf, sess):
     conditions = data_pipe.getRandomSentence(paths, numSamples=3)
     for condition in conditions:
         condition = condition[0].strip()
+        condition = condition.split()
+        num_words = len(condition)
+        ground_truth = ' '.join(condition[-num_words/2:])
+        condition = ' '.join(condition[:num_words/2])
         print 'Condition: {}'.format(condition)
+        print 'Ground-truth: {}'.format(ground_truth)
         for softmax_temp in [1e-16, 0.25, 0.5, 0.75]:
             print softmax_temp
             run_inference_once(model, data, conf, sess, softmax_temp, condition)
@@ -93,10 +98,14 @@ def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence
     condition_sentence: string passed as  initial condition from which model generates next tokens
     """
     result = condition_sentence.strip()
+    max_context_len = len(result.split())
     try:
         for word_idx in range(32):
+            # TODO: Re-running the sentence encoder over the entire history of words is wasteful,
+            # but should checkpoint the internal states of the SARAhs rather than trimming history
+            recent_words = ' '.join(result.split()[-max_context_len:])
             feed = {data.trg_place:result}
-            # TODO: Re-running the sentence encoder over the entire history of words is wasteful
+            feed = {data.trg_place:recent_words}
             sentences_encoded_3 = sess.run(model.sentences_encoded_checkpoint_3, feed_dict=feed)
             word_vectors_2 = sentences_encoded_3[:, -1, :]
             next_word = run_word_decode(model, data, sess, word_vectors_2, softmax_temp,
