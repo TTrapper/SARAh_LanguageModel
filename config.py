@@ -4,7 +4,7 @@ import layers
 def generate_config(keep_prob=1.0, noise_level=0.0):
     char_embed_size = 32
     spell_vector_len = 20
-    max_line_len = 32
+    max_line_len = 64
 
     char_encoder_mlp = 1*[
        {'num_nodes': 512,
