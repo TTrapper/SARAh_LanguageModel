@@ -211,23 +211,19 @@ def sarah(inputs_3, seq_lens_1, bidirectional, layer_specs, initial_state=None):
         return outputs_3
 
 class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
-    def __init__(self, val_size, key_size, num_heads=1, external_mem_array=None,
-        external_seq_lens=None, keep_prob=1.0, noise_level=0.0, activation_fn=None,
-        attention_window=32):
+    def __init__(self, val_size, key_size, num_heads=1, keep_prob=1.0, noise_level=0.0,
+        activation_fn=None, attention_window=32):
         """ """
         self.attention_window = attention_window
         super(SelfAttentiveCell, self).__init__()
         self.val_size = val_size
         self.key_size = key_size
         self.mem_size = key_size + val_size
-        self.num_keys = 1 if external_mem_array is None else 2
         self.num_heads = num_heads
         self.keep_prob = keep_prob
         self.noise_level = noise_level
         self.activation_fn = activation_fn
         self.project_inputs = False
-        self.external_mem_array = external_mem_array
-        self.external_seq_lens = external_seq_lens
 
     @property
     def state_size(self):
@@ -235,7 +231,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
 
     @property
     def output_size(self):
-        return self.val_size + self.num_keys*self.key_size
+        return self.val_size + 2*self.key_size
 
     def build(self, inputs_shape):
         input_depth = inputs_shape[1].value
@@ -245,12 +241,6 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
             self.project_w = self.add_variable('project_w', shape=[input_depth, self.output_size])
             self.project_b = self.add_variable('project_b', shape=[self.output_size])
             self.project_inputs = True
-        if self.external_mem_array is not None:
-            if self.external_mem_array.shape[-1] != self.mem_size:
-                with tf.variable_scope('project_external_mem'):
-                    self.external_mem_array = feed_forward(self.external_mem_array, self.mem_size)
-            self.external_vals = self.external_mem_array[:, :, :self.val_size]
-            self.external_keys = self.external_mem_array[:, :, -self.key_size:]
         self._kernel = self.add_variable('weights', shape=[self.val_size, self.output_size])
         self._bias = self.add_variable('biases', shape=[self.output_size],
             initializer=tf.zeros_initializer(dtype=self.dtype))
@@ -260,15 +250,15 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         if self.project_inputs:
             inputs = tf.nn.bias_add(tf.matmul(inputs, self.project_w), self.project_b)
         seq_lens, memory = state
+        # Split input into QKV, concat it to memory, and apply attention
+        query = inputs[:, -self.key_size:]
+        key_value = inputs[:, :self.mem_size]
         memory = tf.reshape(memory, [-1, self.attention_window, self.mem_size])
-        query = inputs[:, self.val_size:self.val_size+self.key_size]
-        value = inputs[:, :self.val_size]
-        context = self._attend_to_memory(memory, query, seq_lens)
-        if self.external_mem_array is not None:
-            query = inputs[:, -self.key_size:] # not the same query used for internal mem
-            context += self._attend_to_external(query)
-        value += context
-        output = tf.matmul(value, self._kernel)
+        memory = tf.concat([tf.expand_dims(key_value, axis=1), memory], axis=1)
+        context = self._attend_to_memory(memory, query, seq_lens + 1)
+        memory = memory[:, 1:-1, :] # Remove oldest mem_val and the concatenated input val
+        # Run attended history through a feed forward layer to create a new mem_val/output
+        output = tf.matmul(context, self._kernel)
         output = tf.nn.bias_add(output, self._bias)
         output = do_layer_norm(output)
         if self.activation_fn is not None:
@@ -278,7 +268,7 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         # Extract new mem val and add it to memory. Values are added to the beggining to align with
         # sequence masking during attention. This means that memory is in reverse order.
         new_mem_val = tf.expand_dims(output[:, :self.mem_size], axis=1)
-        memory = tf.concat([new_mem_val, memory[:, :-1, :]], axis=1)
+        memory = tf.concat([new_mem_val, memory], axis=1)
         if self.keep_prob < 1.0:
             output = tf.nn.dropout(output, keep_prob=self.keep_prob)
         output += inputs # residual connection
@@ -290,7 +280,3 @@ class SelfAttentiveCell(tf.nn.rnn_cell.RNNCell):
         values = memory_3[:, :, :self.val_size]
         keys = memory_3[:, :, -self.key_size:]
         return multihead_attention(values, keys, query, seq_lens, self.num_heads)
-
-    def _attend_to_external(self, query):
-        return multihead_attention(self.external_vals, self.external_keys, query,
-            self.external_seq_lens, self.num_heads)

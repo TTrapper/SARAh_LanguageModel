@@ -140,17 +140,7 @@ class Test_SARAh(unittest.TestCase):
                 outputs = layers.sarah(inputs, seq_lens, False, layer_specs)
                 sess.run(tf.global_variables_initializer())
                 outputs = sess.run(outputs)
-                self.assertEqual(outputs.shape, (3, 6, 128))
-            with tf.variable_scope('SARAh_external_mem', dtype=tf.float16):
-                inputs = tf.constant(np.random.rand(3, 6, 160), dtype=tf.float16)
-                external_mem = tf.constant(np.random.rand(3, 13, 128), dtype=tf.float16)
-                layer_specs = [{'val_size':96, 'key_size':32, 'num_heads':4,
-                                'external_mem_array':external_mem,
-                                'external_seq_lens':[2,4,13]}]
-                outputs = layers.sarah(inputs, seq_lens, True, layer_specs)
-                sess.run(tf.global_variables_initializer())
-                outputs = sess.run(outputs)
-                self.assertEqual(outputs.shape, (3, 6, 2*(128+32)))
+                self.assertEqual(outputs.shape, (3, 6, 96 + 2 * 32))
 
     def test_multilayer_compiles(self):
         tf.reset_default_graph()
@@ -171,30 +161,7 @@ class Test_SARAh(unittest.TestCase):
                 outputs = layers.sarah(inputs, seq_lens, False, layer_specs)
                 sess.run(tf.global_variables_initializer())
                 outputs = sess.run(outputs)
-                self.assertEqual(outputs.shape, (3, 6, 128 + 64))
-
-            with tf.variable_scope('sarah_multilayer_external_mem', dtype=tf.float16):
-                inputs = tf.constant(np.random.rand(3, 12, 128), dtype=tf.float16)
-                external_seq_lens = seq_lens # outputs above will be conditionin seq below
-                seq_lens = [6, 3, 12]
-                layer_specs = [{'val_size': 128,
-                           'key_size': 64,
-                           'num_heads': 4,
-                           'keep_prob': 0.5,
-                           'external_mem_array': tf.constant(outputs),
-                           'external_seq_lens': external_seq_lens,
-                           'activation_fn': None},
-                          {'val_size': 128,
-                           'key_size': 64,
-                           'num_heads': 2,
-                           'keep_prob': 1.0,
-                           'external_mem_array': tf.constant(outputs),
-                           'external_seq_lens': external_seq_lens,
-                           'activation_fn': tf.nn.relu}]
-                outputs = layers.sarah(inputs, seq_lens, False, layer_specs)
-                sess.run(tf.global_variables_initializer())
-                outputs = sess.run(outputs)
-                self.assertEqual(outputs.shape, (3, 12, 256))
+                self.assertEqual(outputs.shape, (3, 6, 128 + 2 * 64))
 
     def test_bidirectional_multilayer_compiles(self):
         tf.reset_default_graph()
@@ -211,25 +178,7 @@ class Test_SARAh(unittest.TestCase):
                 outputs = layers.sarah(inputs, seq_lens, True, layer_specs)
                 sess.run(tf.global_variables_initializer())
                 outputs = sess.run(outputs)
-                self.assertEqual(outputs.shape, (3, 6, 256))
-
-            with tf.variable_scope('sarah_bidir_external_mem', dtype=tf.float16):
-                inputs = tf.constant(np.random.rand(3, 12, 128), dtype=tf.float16)
-                external_seq_lens = seq_lens # outputs above will be conditionin seq below
-                seq_lens = [6, 3, 12]
-                layer_specs = [{
-                           'val_size': 96,
-                           'key_size': 32,
-                           'num_heads': 4,
-                           'keep_prob': 0.5,
-                           'external_mem_array': tf.constant(outputs),
-                           'external_seq_lens': external_seq_lens,
-                           'activation_fn': None}]
-                outputs = layers.sarah(inputs, seq_lens, True, layer_specs)
-                sess.run(tf.global_variables_initializer())
-                outputs = sess.run(outputs)
-                self.assertEqual(outputs.shape, (3, 12, 2*160))
-
+                self.assertEqual(outputs.shape, (3, 6, 2 * (96 + 2 * 32)))
 
 if __name__ == '__main__':
     unittest.main()
