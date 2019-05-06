@@ -21,7 +21,7 @@ parser.add_argument('--restore', type=str, required=True)
 parser.add_argument('--vocab_file', type=str, default='./vocab')
 parser.add_argument('--max_size', type=int, default=None)
 
-def get_vocab(datadir, vocab_file, max_size=None, words_only=False):
+def get_vocab(datadir, vocab_file, max_size=None, words_only=False, normalize=False):
     if os.path.exists(vocab_file):
         print 'loading precomputed vocab: {}'.format(vocab_file)
         word_to_freq = pickle.load(open(vocab_file, 'rb'))
@@ -31,9 +31,16 @@ def get_vocab(datadir, vocab_file, max_size=None, words_only=False):
         for f in os.listdir(datadir):
             word_to_freq += Counter(open(datadir + f, 'r').read().split())
         pickle.dump(word_to_freq, open(vocab_file, 'wb'))
+    if normalize:
+        word_to_freq = Counter(normalize_vocab(word_to_freq))
     word_to_freq = word_to_freq.most_common(max_size)
     return [word_freq_tuple[0] for word_freq_tuple in word_to_freq] if words_only else \
         Counter(dict(word_to_freq))
+
+def normalize_vocab(word_to_freq):
+    totalcount = sum([word_to_freq[w] for w in word_to_freq])
+    word_to_freq = {word:float(word_to_freq[word])/totalcount for word in word_to_freq}
+    return word_to_freq
 
 def get_word_embeds(savename, datadir, vocab, restore):
     embed_file = '{}.embeds.npy'.format(savename)
