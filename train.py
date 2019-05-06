@@ -98,13 +98,12 @@ def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence
     condition_sentence: string passed as  initial condition from which model generates next tokens
     """
     result = condition_sentence.strip()
-    max_context_len = len(result.split())
+    max_context_len = 2*len(result.split())
     try:
         for word_idx in range(32):
             # TODO: Re-running the sentence encoder over the entire history of words is wasteful,
             # but should checkpoint the internal states of the SARAhs rather than trimming history
             recent_words = ' '.join(result.split()[-max_context_len:])
-            feed = {data.trg_place:result}
             feed = {data.trg_place:recent_words}
             sentences_encoded_3 = sess.run(model.sentences_encoded_checkpoint_3, feed_dict=feed)
             word_vectors_2 = sentences_encoded_3[:, -1, :]
