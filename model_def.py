@@ -51,8 +51,10 @@ class Model(object):
             spell_vectors_3 = tf.reshape(spell_vectors_3, [-1,  max_sentence_len, spell_vector_size])
         return spell_vectors_3
 
-    def build_positional_char_embeds(self, char_ids_3, char_embed_size, mlp_layer_specs):
+    def build_positional_char_embeds(self, char_ids_3, char_embed_size, mlp_layer_specs,
+        word_len_limit):
         """ """
+        char_ids_3 = char_ids_3[:, :, :word_len_limit] # potentially trim long words
         batch_size, max_sentence_len, max_word_len = tf.unstack(tf.shape(char_ids_3))
         # Select char embeddings
         with tf.variable_scope('chars'):
@@ -82,7 +84,7 @@ class Model(object):
         config = self.config
         with tf.variable_scope('char_encoder', reuse=reuse_vars):
             char_embeds_4 = self.build_positional_char_embeds(char_ids_3, config['char_embed_size'],
-                config['char_encoder_mlp'])
+                config['char_encoder_mlp'], config['max_word_len'])
         with tf.variable_scope('word_encoder', reuse=reuse_vars):
             # Sum positional_char_embeds to get a word_vector, normalize and noise it.
             word_vectors_3 = layers.do_layer_norm(tf.reduce_sum(char_embeds_4, axis=2))
