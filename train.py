@@ -109,11 +109,12 @@ def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence
             word_vectors_2 = sentences_encoded_3[:, -1, :]
             next_word = run_word_decode(model, data, sess, word_vectors_2, softmax_temp,
                 conf['max_word_len'])
+            print(' ' + next_word),
+            sys.stdout.flush()
             result += ' ' + next_word
     except Exception as e:
         print e
-    result = result.replace(condition_sentence, '').replace(' {} '.format(data.go_stop_token), ' __ ')
-    print result
+    print
 
 def run_word_decode(model, data, sess, word_vectors_2, softmax_temp, max_word_len):
     word = ''
