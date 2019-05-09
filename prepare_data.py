@@ -1,5 +1,6 @@
 import argparse
 import os
+import random
 import re
 import unicodedata
 
@@ -13,6 +14,7 @@ parser.add_argument('--parse_sentences', type=str, choices=['yes', 'no'], defaul
 parser.add_argument('--autoencode', type=str, choices=['yes', 'no'], default='no')
 parser.add_argument('--go_stop_chr', type=str, default=chr(0))
 parser.add_argument('--newline', type=str, default=' _-_ ')
+parser.add_argument('--shuffle', type=str, choices=['yes', 'no'], default='no')
 
 def parse_by_alpha(line):
     """
@@ -30,6 +32,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.parse_sentences = args.parse_sentences == 'yes'
     args.autoencode = args.autoencode == 'yes'
+    args.shuffle = args.shuffle == 'yes'
     assert(args.src != args.dst)
     if not os.path.exists(args.dst):
         os.makedirs(args.dst)
@@ -50,4 +53,6 @@ if __name__ == '__main__':
                 src_doc = [' '.join(src_doc[i:i + args.seq_len]) for i in xrange(0, len(src_doc), args.seq_len)]
             if args.autoencode:
                 src_doc = ['{} |SEP| {}'.format(s,s) for s in src_doc] # autoencode mode repeats each sentence/line with a separator
+            if args.shuffle:
+                random.shuffle(src_doc)
             dst_doc.write('\n'.join(src_doc))
