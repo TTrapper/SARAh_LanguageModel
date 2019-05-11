@@ -29,27 +29,25 @@ def generate_config(keep_prob=1.0, noise_level=0.0):
         'activation_fn':layers.gelu,
         'attention_window':16}]
 
-    word_decoder_size = 2*spell_vector_len*char_embed_size
     # project out word embeddings to same size as word_decoder layers
     sentence_decoder_projection = 1*[
-       {'num_nodes':word_decoder_size,
+       {'num_nodes':256,
         'activation_fn':layers.gelu,
         'layer_norm':True,
         'keep_prob':keep_prob,
         'noise_level':noise_level}]
 
     word_decoder_mlp = 8*[
-       {'num_nodes':word_decoder_size,
+       {'num_nodes':256,
         'activation_fn':layers.gelu,
         'layer_norm':True,
         'keep_prob':keep_prob,
-        'noise_level':noise_level,
-        'seq_len_for_future_mask':spell_vector_len}]
+        'noise_level':noise_level}]
 
     config = {
               'max_grad_norm':5,
               'learn_rate':1e-4,
-              'batch_size':24,
+              'batch_size':20,
               'char_embed_size':char_embed_size,
               'spell_vector_len':spell_vector_len,
               'max_word_len':19,

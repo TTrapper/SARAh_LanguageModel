@@ -124,25 +124,30 @@ class Model(object):
             word_vectors_3 = layers.mlp(word_vectors_3, self.config['sentence_decoder_projection'])
         with tf.variable_scope('word_decoder'):
             spell_vector_len = config['spell_vector_len']
+            spell_vector_size = spell_vector_len * config['char_embed_size']
+            spell_vector_size *= 2 # TODO make this factor configurable
             # Grab char embeds and concat them to spelling vector representations of words
             char_ids_3 = self.add_go(char_ids_3, axis=2)
             char_embeds_4 = layers.embedding(self.num_chars, config['char_embed_size'], char_ids_3)
             spell_vectors_3 = self.create_spell_vector(char_embeds_4, spell_vector_len)
-            # Create a weight_mask that prevents a dense layer from seeing future chars
-            spell_vector_size = spell_vectors_3.shape.as_list()[-1]
-            word_depth = word_vectors_3.shape.as_list()[-1]
-            # Combine spelling vector with conditioning vector using future masked mlp
-            spell_vectors_projected_3 = layers.feed_forward(spell_vectors_3, num_nodes=word_depth,
-                activation_fn=layers.gelu, keep_prob=config['keep_prob'], layer_norm=True,
-                seq_len_for_future_mask=spell_vector_len)
-            word_and_chars_3 = word_vectors_3 + spell_vectors_projected_3
-            word_vectors_3 = layers.mlp(word_and_chars_3, config['word_decoder_mlp'])
+            # Pass spelling vector through a layer that can see previous chars, but can't see ahead
+            with tf.variable_scope('future_masked_spelling'):
+                spell_vectors_projected_3 = layers.feed_forward(spell_vectors_3,
+                    num_nodes=spell_vector_size, seq_len_for_future_mask=spell_vector_len)
             # Reshape word representation into individual char representations
             batch_size, sentence_len, word_len = tf.unstack(tf.shape(char_ids_3))
-            char_size = word_vectors_3.shape.as_list()[-1]/spell_vector_len
-            char_vectors_4 = tf.reshape(word_vectors_3, [batch_size, sentence_len, spell_vector_len,
-                char_size])
+            char_size = spell_vectors_projected_3.shape.as_list()[-1]/spell_vector_len
+            char_vectors_4 = tf.reshape(spell_vectors_projected_3,
+                [batch_size, sentence_len, spell_vector_len, char_size])
             char_vectors_4 = char_vectors_4[:, :, :word_len, :]
+            # Project each char_vector up to the size of the conditioning word_vector
+            with tf.variable_scope('char_projection'):
+                word_depth = word_vectors_3.shape.as_list()[-1]
+                char_vectors_4 = layers.feed_forward(char_vectors_4, num_nodes=word_depth)
+            # Add the conditioning word_vector to each char and pass result through an mlp
+            char_vectors_4 += tf.expand_dims(word_vectors_3, axis=2)
+            char_vectors_4 = layers.mlp(char_vectors_4, config['word_decoder_mlp'])
         with tf.variable_scope('logits'):
-            char_logits_4 = layers.feed_forward(char_vectors_4, num_nodes=self.num_chars)
+            char_logits_4 = layers.feed_forward(char_vectors_4, num_nodes=self.num_chars,
+                noise_level=config['noise_level'])
         return char_logits_4
