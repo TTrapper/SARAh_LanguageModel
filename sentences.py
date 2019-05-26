@@ -14,9 +14,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', type=str, required=True)
 parser.add_argument('--restore', type=str, required=True)
 parser.add_argument('--savename', type=str, default='./embeded_sentences')
+parser.add_argument('--max_num', type=int, default=None)
 parser.add_argument('--write_examples', type=str, default='no', choices=['yes', 'no'])
 
-def get_sentence_embeds(savename, datadir, restore):
+def get_sentence_embeds(savename, datadir, restore, max_num):
     embed_file = '{}.embeds.npy'.format(savename)
     if os.path.exists(embed_file):
         print 'loading precomputed embeddings: {}'.format(embed_file)
@@ -24,10 +25,10 @@ def get_sentence_embeds(savename, datadir, restore):
         labels = open('{}.labels'.format(savename)).readlines()
         labels = [l.strip() for l in labels]
         return sentence_embeds, labels
-    sentence_embeds, labels = compute_sentence_embeds(datadir, restore, savename)
+    sentence_embeds, labels = compute_sentence_embeds(datadir, restore, savename, max_num)
     return sentence_embeds, labels
 
-def run_loop(sess, data, sentence_embeds_2_op, sentences_3_op):
+def run_loop(sess, data, sentence_embeds_2_op, sentences_3_op, max_num):
     batch_num = 0
     embeds = []
     labels = []
@@ -40,16 +41,21 @@ def run_loop(sess, data, sentence_embeds_2_op, sentences_3_op):
             labels.extend(sentences)
         except tf.errors.OutOfRangeError as e:
             print '{} sentences encoded'.format(len(labels))
+            sys.stdout.flush()
+            break
+        if max_num is not None and len(labels) >= max_num:
+            print '{} sentences encoded'.format(len(labels))
+            sys.stdout.flush()
             break
         if batch_num%50 == 1:
             print '{} sentences encoded'.format(len(labels))
-        sys.stdout.flush()
+            sys.stdout.flush()
     return np.concatenate(embeds, axis=0), labels
 
-def compute_sentence_embeds(datadir, restore, savename):
+def compute_sentence_embeds(datadir, restore, savename, max_num):
     print 'computing sentence embeddings from model: {}'.format(restore)
     model, _, data, sess = words.sess_setup(datadir, restore, batch_size=256)
-    embeds, labels = run_loop(sess, data, model.sentence_embeds_2, data.trg.to_tensor(-1))
+    embeds, labels = run_loop(sess, data, model.sentence_embeds_2, data.trg.to_tensor(-1), max_num)
     print embeds.shape
     np.save('{}.embeds.npy'.format(savename), embeds)
     with open('{}.labels'.format(savename), 'w') as label_file:
@@ -112,7 +118,7 @@ def show_similar(embeds, label, n_examples=100, n_nearby=4):
         print '--------------------------------------------------'
     return
 
-    # TODO: gensim is much faster but something is off with the results
+    # TODO: gensim is much faster but doesn't handle duplicate entries very well
     kv = KeyedVectors(embeds.shape[-1])
     kv.add(labels, embeds)
     random_labels = random.sample(labels, 10)
@@ -125,10 +131,11 @@ def show_similar(embeds, label, n_examples=100, n_nearby=4):
 if __name__ == '__main__':
     args = parser.parse_args()
     args.write_examples = args.write_examples == 'yes'
-    sentence_embeds, labels = get_sentence_embeds(args.savename, args.datadir, args.restore)
+    sentence_embeds, labels = get_sentence_embeds(args.savename, args.datadir, args.restore,
+        args.max_num)
+    show_similar(sentence_embeds, labels)
     projected_embeds = words.project_embeds(args.savename, sentence_embeds)
     words.plot_projections(projected_embeds, labels, args.savename)
-    show_similar(sentence_embeds, labels)
     if args.write_examples:
         make_similars_examples(sentence_embeds, labels, n_nearby=2, savename=args.savename)
 
