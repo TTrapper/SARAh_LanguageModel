@@ -16,6 +16,7 @@ parser.add_argument('--restore', type=str, required=True)
 parser.add_argument('--savename', type=str, default='./embeded_sentences')
 parser.add_argument('--max_num', type=int, default=None)
 parser.add_argument('--write_examples', type=str, default='no', choices=['yes', 'no'])
+parser.add_argument('--project', type=str, default='no', choices=['yes', 'no'])
 
 def get_sentence_embeds(savename, datadir, restore, max_num):
     embed_file = '{}.embeds.npy'.format(savename)
@@ -40,16 +41,14 @@ def run_loop(sess, data, sentence_embeds_2_op, sentences_3_op, max_num):
             embeds.append(sentence_embeds_2)
             labels.extend(sentences)
         except tf.errors.OutOfRangeError as e:
-            print '{} sentences encoded'.format(len(labels))
-            sys.stdout.flush()
             break
         if max_num is not None and len(labels) >= max_num:
-            print '{} sentences encoded'.format(len(labels))
-            sys.stdout.flush()
             break
         if batch_num%50 == 1:
             print '{} sentences encoded'.format(len(labels))
             sys.stdout.flush()
+    print '{} sentences encoded'.format(len(labels))
+    sys.stdout.flush()
     return np.concatenate(embeds, axis=0), labels
 
 def compute_sentence_embeds(datadir, restore, savename, max_num):
@@ -81,26 +80,29 @@ def get_paraphrases(embeds, labels, min_distant=1, max_distance=9):
 def make_similars_examples(embeds, labels, n_nearby, savename):
     """
     Runs through each sentence in labels and finds the n_nearby closest sentences, writing each
-    pair to a file that can be used as a set of examples for training. Each line of the file
-    contains a pair of similar sentences separated by: '|SEP|'
+    tuple to a file that can be used as a set of examples for training. Each line of the file
+    contains a tuple of similar sentences separated by: '|SEP|'
     """
     filename = '{}.similars'.format(savename)
     print 'Writing examples to file: {}'.format(filename)
     with open(filename, 'w') as out_file:
-        for num_processed, query_sentence in enumerate(labels):
-            index = labels.index(query_sentence)
-            vector = embeds[index, :]
-            dists = pairwise_distances([vector], embeds, 'euclidean')[0]
-            # try to skip all of the duplicates by removing the really short distances
-            dists = [d if d > 1.0 else np.inf for d in dists]
-            for _ in range(n_nearby):
-                idx = np.argmin(dists)
-                dist = dists[idx]
-                close_sentence = labels[idx]
-                out_file.write('{} |SEP| {}\n'.format(query_sentence, close_sentence))
-                dists[np.argmin(dists)] = np.inf # replace this dist with inf before next iteration
-            if num_processed % 500 == 0:
-                print '{} lines processed'.format(num_processed + 1)
+        batch_size = 1024
+        num_processed = 0
+        for batch in range(len(labels)/batch_size):
+            query_sentences = labels[batch*batch_size:batch_size + batch*batch_size]
+            vectors = embeds[batch*batch_size:batch_size + batch*batch_size]
+            dists = pairwise_distances(vectors, embeds, 'euclidean')
+            # Use argpartition to quickly get the indices of the closest n sentences
+            nearby_ind = np.argpartition(dists, kth=1 + n_nearby, axis=1)[:, :1 + n_nearby]
+            # Loop over the batch of sentences
+            for ind_row, dist_row, query_sentence in zip(nearby_ind, dists, query_sentences):
+                ind_row = ind_row[np.argsort(dist_row[ind_row])][1:] # sort, remove the query's idx
+                similar_sentences = [query_sentence]
+                similar_sentences.extend([labels[idx] for idx in ind_row])
+                out_file.write(' |SEP| '.join(similar_sentences) + '\n')
+            num_processed += batch_size
+            if batch % 2 == 0:
+                print '{} lines processed'.format(num_processed)
                 sys.stdout.flush()
 
 def show_similar(embeds, label, n_examples=100, n_nearby=4):
@@ -131,11 +133,12 @@ def show_similar(embeds, label, n_examples=100, n_nearby=4):
 if __name__ == '__main__':
     args = parser.parse_args()
     args.write_examples = args.write_examples == 'yes'
+    args.project = args.project == 'yes'
     sentence_embeds, labels = get_sentence_embeds(args.savename, args.datadir, args.restore,
         args.max_num)
     show_similar(sentence_embeds, labels)
-    projected_embeds = words.project_embeds(args.savename, sentence_embeds)
-    words.plot_projections(projected_embeds, labels, args.savename)
     if args.write_examples:
-        make_similars_examples(sentence_embeds, labels, n_nearby=2, savename=args.savename)
-
+        make_similars_examples(sentence_embeds, labels, n_nearby=4, savename=args.savename)
+    if args.project:
+        projected_embeds = words.project_embeds(args.savename, sentence_embeds)
+        words.plot_projections(projected_embeds, labels, args.savename)
