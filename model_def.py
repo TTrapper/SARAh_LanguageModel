@@ -106,11 +106,16 @@ class Model(object):
     def _checkpoint_encodings(self, sentences_encoded_3, sentence_lens_1, inference_mode):
         """
         Sets up a checkpoint for inference mode on the context encoded word_vectors.
-        Also creates a a fixed-length sentence representation from the mean of the word_vectors.
+        Also creates a a fixed-length sentence representation (the output at the last word)
         """
         sentence_lens_2 = tf.expand_dims(sentence_lens_1, axis=1)
         sentence_lens_2 = tf.cast(sentence_lens_2, sentences_encoded_3.dtype)
-        self.sentence_embeds_2 = tf.reduce_sum(sentences_encoded_3, axis=1)/sentence_lens_2
+        # Grab the final output from each sentence to use as a fixed length sentence embedding
+        sentence_embeds_2 = []
+        for sentence_len, sentence_encoded_2 in zip(tf.unstack(sentence_lens_1), tf.unstack(sentences_encoded_3)):
+            sentence_embeds_2.append(sentence_encoded_2[sentence_len - 1, :])
+        self.sentence_embeds_2 = tf.stack(sentence_embeds_2)
+        # Create a placeholder checkpoint to use in inference_mode
         self.sentences_encoded_checkpoint_3 = sentences_encoded_3
         if inference_mode:
             self.sentences_encoded_placeholder_3 = tf.placeholder(name='sentences_encoded_3',
