@@ -19,6 +19,10 @@ parser.add_argument('--noise_level', type=float, default=0.0)
 parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'])
 parser.add_argument('--train_words', type=str, default='yes', choices=['yes','no','true','false'])
 parser.add_argument('--inference_mode', type=str, default='no', choices=['yes','no','true','false'])
+parser.add_argument('--separator', type=str, default='**half**',
+    help='For inference: token used to split each line into condition and ground truth, where \
+          condition is fed to the model and ground_truth is displayed for comparison against model \
+          outputs (**half** is a special case that results in the line being split in half).')
 
 def parse_bool_arg(arg_str):
     return arg_str == 'yes' or arg_str == 'true'
@@ -76,29 +80,43 @@ def build_train_op(loss, learn_rate, max_grad_norm, vars_to_train):
     train_op = optimizer.apply_gradients(zip(grads, vars_to_train))
     return train_op, grads, norm
 
-def run_inference(model, data, conf, sess):
-    inference_dir = args.datadir if args.inference_dir is None else args.inference_dir
-    paths = ['{}/{}'.format(inference_dir, p) for p in os.listdir(inference_dir)]
-    conditions = data_pipe.getRandomSentence(paths, numSamples=3)
-    for condition in conditions:
-        condition = condition[0].strip()
+def split_condition(condition, separator):
+    if separator == '**half**':
+        # split the conditioning line in half, leaving the second half as the ground_truth
         condition = condition.split()
         num_words = len(condition)
         ground_truth = ' '.join(condition[-num_words/2:])
         condition = ' '.join(condition[:num_words/2])
-        print 'Condition: {}'.format(condition)
-        print 'Ground-truth: {}'.format(ground_truth)
-        for softmax_temp in [1e-16, 0.25, 0.5, 0.75]:
-            print softmax_temp
-            run_inference_once(model, data, conf, sess, softmax_temp, condition)
-        print
+    elif separator in condition:
+        # split the conditioning line on instances of separator using the first split as condition
+        # and all subsequent splits as the ground_truth
+        condition = condition.split(separator)
+        ground_truth = separator.join(condition[1:])
+        condition = condition[0]
+    else:
+        ground_truth = 'NO GROUND TRUTH (the separator was not found in condition)'
+    return condition, ground_truth
+
+def run_inference(model, data, conf, sess, separator, inference_dir):
+    paths = ['{}/{}'.format(inference_dir, p) for p in os.listdir(inference_dir)]
+    for doc in range(1):
+        conditions = data_pipe.getRandomSentence(paths, numSamples=2)
+        for condition in conditions:
+            condition = condition[0].strip()
+            condition, ground_truth = split_condition(condition, separator)
+            print 'Condition: {}'.format(condition)
+            print 'Ground-truth: {}'.format(ground_truth)
+            for softmax_temp in [1e-16, 0.25, 0.5, 0.75, 1.0]:
+                print softmax_temp
+                run_inference_once(model, data, conf, sess, softmax_temp, condition)
+            print
 
 def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence=''):
     """
     condition_sentence: string passed as  initial condition from which model generates next tokens
     """
     result = condition_sentence.strip()
-    max_context_len = 2*len(result.split())
+    max_context_len = conf['max_line_len'] - 1
     try:
         for word_idx in range(32):
             # TODO: Re-running the sentence encoder over the entire history of words is wasteful,
@@ -132,6 +150,7 @@ def run_word_decode(model, data, sess, word_vectors_2, softmax_temp, max_word_le
     return word
 
 def train():
+    inference_dir = args.datadir if args.inference_dir is None else args.inference_dir
     conf = config.generate_config(args.keep_prob, args.noise_level)
     data = data_pipe.Data(args.datadir, conf['batch_size'], conf['max_word_len'],
         conf['max_line_len'], eval_mode=args.eval_mode)
@@ -153,7 +172,7 @@ def train():
                 print v
         restorer.restore(sess, args.restore)
     if args.inference_mode:
-        run_inference(free_model, data, conf, sess)
+        run_inference(free_model, data, conf, sess, args.separator, inference_dir)
         exit()
     data.initialize(sess, data.datadir + '*')
     recent_costs = deque(maxlen=100)
@@ -179,7 +198,7 @@ def train():
             if not args.eval_mode:
                 saver.save(sess, './saves/model.ckpt')
         if not args.eval_mode and batch_num%1000 == 10:
-            run_inference(free_model, data, conf, sess)
+            run_inference(free_model, data, conf, sess, args.separator, inference_dir)
             print
         sys.stdout.flush()
 
