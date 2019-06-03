@@ -11,8 +11,8 @@ import tensorflow as tf
 import words
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--datadir', type=str, required=True)
-parser.add_argument('--restore', type=str, required=True)
+parser.add_argument('--datadir', type=str, required=False)
+parser.add_argument('--restore', type=str, required=False)
 parser.add_argument('--savename', type=str, default='./embeded_sentences')
 parser.add_argument('--max_num', type=int, default=None)
 parser.add_argument('--write_examples', type=str, default='no', choices=['yes', 'no'])
