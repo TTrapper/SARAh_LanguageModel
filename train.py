@@ -7,22 +7,29 @@ import numpy as np
 import tensorflow as tf
 
 import data_pipe
+import inference
 import model_def
 import config
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--datadir', type=str, required=True)
-parser.add_argument('--inference_dir', type=str, default=None)
-parser.add_argument('--restore', type=str, default=None)
-parser.add_argument('--keep_prob', type=float, default=1.0)
-parser.add_argument('--noise_level', type=float, default=0.0)
-parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'])
-parser.add_argument('--train_words', type=str, default='yes', choices=['yes','no','true','false'])
-parser.add_argument('--inference_mode', type=str, default='no', choices=['yes','no','true','false'])
-parser.add_argument('--separator', type=str, default='**half**',
-    help='For inference: token used to split each line into condition and ground truth, where \
-          condition is fed to the model and ground_truth is displayed for comparison against model \
-          outputs (**half** is a special case that results in the line being split in half).')
+parser.add_argument('--datadir', type=str, required=True,
+    help='A directory containing txt files with one training example per line')
+parser.add_argument('--inference_dir', type=str, default=None,
+    help='A directory with txt files from which to sample random context lines for inference')
+parser.add_argument('--restore', type=str, default=None,
+    help='Path to a TF checkpoint to restore')
+parser.add_argument('--keep_prob', type=float, default=1.0,
+    help='Keep prob for dropout')
+parser.add_argument('--noise_level', type=float, default=0.0,
+    help='How much gaussian noise (proportional to layer\'s moments) to add to activations')
+parser.add_argument('--eval_mode', type=str, default='no', choices=['yes','no','true','false'],
+    help='If true (yes), disable training and aggragate cost over one epoch of data')
+parser.add_argument('--train_words', type=str, default='yes', choices=['yes','no','true','false'],
+    help='enable/disable training of word encoder and word decoder')
+parser.add_argument('--inference_mode', type=str, default='no', choices=['yes','no','true','false'],
+    help='If true (yes), disables training and runs inference')
+parser.add_argument('--groundtruth_mode', type=str, default='half', choices=['half', '|SEP|', 'off'],
+    help='Inference: determines how to split the context to display a ground_truth')
 
 def parse_bool_arg(arg_str):
     return arg_str == 'yes' or arg_str == 'true'
@@ -80,74 +87,30 @@ def build_train_op(loss, learn_rate, max_grad_norm, vars_to_train):
     train_op = optimizer.apply_gradients(zip(grads, vars_to_train))
     return train_op, grads, norm
 
-def split_condition(condition, separator):
-    if separator == '**half**':
-        # split the conditioning line in half, leaving the second half as the ground_truth
-        condition = condition.split()
-        num_words = len(condition)
-        ground_truth = ' '.join(condition[-num_words/2:])
-        condition = ' '.join(condition[:num_words/2])
-    elif separator in condition:
-        # split the conditioning line on instances of separator using the first split as condition
-        # and all subsequent splits as the ground_truth
-        condition = condition.split(separator)
-        ground_truth = separator.join(condition[1:])
-        condition = condition[0]
-    else:
-        ground_truth = 'NO GROUND TRUTH (the separator was not found in condition)'
-    return condition, ground_truth
-
-def run_inference(model, data, conf, sess, separator, inference_dir):
-    paths = ['{}/{}'.format(inference_dir, p) for p in os.listdir(inference_dir)]
-    for doc in range(1):
-        conditions = data_pipe.getRandomSentence(paths, numSamples=2)
-        for condition in conditions:
-            condition = condition[0].strip()
-            condition, ground_truth = split_condition(condition, separator)
-            print 'Condition: {}'.format(condition)
-            print 'Ground-truth: {}'.format(ground_truth)
-            for softmax_temp in [1e-16, 0.25, 0.5, 0.75, 1.0]:
-                print softmax_temp
-                run_inference_once(model, data, conf, sess, softmax_temp, condition)
+def train_loop(sess, ops, saver, is_eval_mode, inferencer):
+    recent_costs = deque(maxlen=100)
+    batch_num = 0
+    while True:
+        batch_num += 1
+        try:
+            out = sess.run(ops)
+            n = out['norm']
+            c = out['loss']
+            recent_costs.append(c)
+            if is_eval_mode: # for eval we want the total cost over the entire epoch
+                recent_costs = [sum(recent_costs)]
+        except tf.errors.OutOfRangeError as e:
+            print 'EOE:', batch_num, sum(recent_costs)/batch_num
+            return
+        if batch_num % 250 == 1:
+            cost_window = len(recent_costs) if not is_eval_mode else batch_num
+            print batch_num, sum(recent_costs)/cost_window, n
+            if not is_eval_mode:
+                saver.save(sess, './saves/model.ckpt')
+        if not is_eval_mode and batch_num % 1000 == 10:
+            inferencer.run_inference()
             print
-
-def run_inference_once(model, data, conf, sess, softmax_temp, condition_sentence=''):
-    """
-    condition_sentence: string passed as  initial condition from which model generates next tokens
-    """
-    result = condition_sentence.strip()
-    max_context_len = conf['max_line_len'] - 1
-    try:
-        for word_idx in range(32):
-            # TODO: Re-running the sentence encoder over the entire history of words is wasteful,
-            # but should checkpoint the internal states of the SARAhs rather than trimming history
-            recent_words = ' '.join(result.split()[-max_context_len:])
-            feed = {data.trg_place:recent_words}
-            sentences_encoded_3 = sess.run(model.sentences_encoded_checkpoint_3, feed_dict=feed)
-            word_vectors_2 = sentences_encoded_3[:, -1, :]
-            next_word = run_word_decode(model, data, sess, word_vectors_2, softmax_temp,
-                conf['max_word_len'])
-            print(next_word),
-            sys.stdout.flush()
-            result += ' ' + next_word
-    except Exception as e:
-        print e
-    print
-
-def run_word_decode(model, data, sess, word_vectors_2, softmax_temp, max_word_len):
-    word = ''
-    feed = {model.sentences_encoded_placeholder_3:np.expand_dims(word_vectors_2, axis=1),
-            model.softmax_temp:softmax_temp}
-    for char_idx in range(max_word_len):
-        feed[data.trg_place] = word
-        predictions = sess.run(model.predictions_3, feed_dict=feed)
-        next_char = data.id_to_chr[predictions[0, 0, char_idx]]
-        if next_char == data.go_stop_token: # End of word
-            if char_idx == 0: # End of sentence
-                word += next_char
-            break
-        word += next_char
-    return word
+        sys.stdout.flush()
 
 def train():
     inference_dir = args.datadir if args.inference_dir is None else args.inference_dir
@@ -160,6 +123,16 @@ def train():
     train_op, grads, norm = build_train_op(loss, conf['learn_rate'], conf['max_grad_norm'],
         vars_to_train)
     sess = tf.Session()
+    inferencer = inference.InferenceRunner(sess,
+                                           free_model,
+                                           data,
+                                           inference_dir,
+                                           context_placeholder=data.trg_place,
+                                           max_context_len=conf['max_line_len'] - 1,
+                                           groundtruth_mode=args.groundtruth_mode,
+                                           softmax_temps=[1e-16, 0.5, 0.75, 1.0],
+                                           num_predictions=32,
+                                           num_runs_per_call=2)
     saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=1)
     sess.run(tf.tables_initializer())
     sess.run(tf.global_variables_initializer())
@@ -172,40 +145,18 @@ def train():
                 print v
         restorer.restore(sess, args.restore)
     if args.inference_mode:
-        run_inference(free_model, data, conf, sess, args.separator, inference_dir)
+        inferencer.run_inference()
         exit()
     data.initialize(sess, data.datadir + '*')
-    recent_costs = deque(maxlen=100)
     ops = {'norm':norm, 'loss':loss}
     if not args.eval_mode:
         ops['train'] = train_op
-    batch_num = 0
-    while True:
-        batch_num += 1
-        try:
-            out = sess.run(ops)
-            n = out['norm']
-            c = out['loss']
-            recent_costs.append(c)
-            if args.eval_mode: # for eval we want the total cost over the entire epoch
-                recent_costs = [sum(recent_costs)]
-        except tf.errors.OutOfRangeError as e:
-            print 'EOE:', batch_num, sum(recent_costs)/batch_num
-            return
-        if batch_num%250 == 1:
-            cost_window = len(recent_costs) if not args.eval_mode else batch_num
-            print batch_num, sum(recent_costs)/cost_window, n
-            if not args.eval_mode:
-                saver.save(sess, './saves/model.ckpt')
-        if not args.eval_mode and batch_num%1000 == 10:
-            run_inference(free_model, data, conf, sess, args.separator, inference_dir)
-            print
-        sys.stdout.flush()
-
+    train_loop(sess, ops, saver, args.eval_mode, inferencer)
 
 if __name__ == '__main__':
     args = parser.parse_args()
     args.eval_mode = parse_bool_arg(args.eval_mode)
     args.train_words = parse_bool_arg(args.train_words)
     args.inference_mode = parse_bool_arg(args.inference_mode)
+
     train()
