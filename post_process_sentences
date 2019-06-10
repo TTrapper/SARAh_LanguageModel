@@ -1,0 +1,9 @@
+#!/bin/bash
+# This script processes a dir of text files, clips each line to a max 512 chars,
+# uniq's the lines, shuffles them, and aggregates them into a single file.
+
+if [ "$1" != "" ] && [ -d "$1" ]; then
+    cat $1/* | cut -c -512 | sort | uniq | shuf > uniq_shuf.txt
+else
+    echo "Must supply a path to a directory containing the txt files to be processed"
+fi
