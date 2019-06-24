@@ -61,22 +61,6 @@ def compute_sentence_embeds(datadir, restore, savename, max_num):
         label_file.write('\n'.join(labels))
     return embeds, labels
 
-def get_paraphrases(embeds, labels, min_distant=1, max_distance=9):
-    """
-    experimental - finds pairs of sentences whose distance falls within a given range. The hope is
-    to filter for pairs that have a minimum level of semantic similarity yet arent duplicates.
-    But sometimes the spatially closest sentence is not the best semantic match.
-    """
-    for label, vector in zip(labels, embeds):
-        dists = pairwise_distances([vector], embeds, 'euclidean')[0]
-        dists[np.argmin(dists)] = np.inf # nearest should be itself, replace it to get next-nearest
-        if np.min(dists) < max_distance and np.min(dists) > min_distant:
-            print dists[np.argmin(dists)]
-            print label
-            print labels[np.argmin(dists)]
-            print '--------------------------------------------------'
-    return
-
 def make_similars_examples(embeds, labels, n_nearby, savename):
     """
     Runs through each sentence in labels and finds the n_nearby closest sentences, writing each
