@@ -26,29 +26,34 @@ def parse_by_alpha(line):
     # The above splits add null strings, remove them.
     return [word for word in words if word != '']
 
+def _process_dir(src_dir, dst_dir):
+    if not os.path.exists(dst_dir):
+        os.makedirs(dst_dir)
+    src_docs = os.listdir(src_dir)
+    for doc_num, src_doc in enumerate(src_docs):
+        print 'processing documents ({} of {})\r'.format(1 + doc_num, len(src_docs)),
+        sys.stdout.flush()
+        src_filepath = '{}/{}'.format(src_dir, src_doc)
+        dst_filepath = '{}/{}'.format(dst_dir, src_doc)
+        _process_doc(src_filepath, dst_filepath)
+
+def _process_doc(src_filepath, dst_filepath):
+    with open(dst_filepath, 'w') as dst_doc, open(src_filepath, 'r') as src_doc:
+        src_doc = src_doc.read()
+        src_doc = src_doc.replace('\n', args.newline).replace('\r', args.newline)
+        if args.sentences: # Parse doc into sentences
+            src_doc = src_doc.decode('utf-8', 'ignore')
+            tokenizer = PunktSentenceTokenizer(src_doc)
+            src_doc = tokenizer.tokenize(src_doc)
+            src_doc = [' '.join(parse_by_alpha(s)) for s in src_doc]
+            src_doc = [s.encode('utf-8', 'ignore') for s in src_doc]
+        else: # Parse doc into fixed number of words per line
+            src_doc = parse_by_alpha(src_doc)
+            src_doc = [' '.join(src_doc[i:i + args.seq_len]) for i in xrange(0, len(src_doc), args.seq_len)]
+        dst_doc.write('\n'.join(src_doc))
+
 if __name__ == '__main__':
     args = parser.parse_args()
     args.sentences = args.sentences == 'yes'
     assert(args.src != args.dst)
-    if not os.path.exists(args.dst):
-        os.makedirs(args.dst)
-    src_docs = os.listdir(args.src)
-    for doc_num, src_doc in enumerate(src_docs):
-        print 'processing documents ({} of {})\r'.format(1 + doc_num, len(src_docs)),
-        sys.stdout.flush()
-        src_filepath = '{}/{}'.format(args.src, src_doc)
-        dst_filepath = '{}/{}'.format(args.dst, src_doc)
-        with open(dst_filepath, 'w') as dst_doc, open(src_filepath, 'r') as src_doc:
-            src_doc = src_doc.read()
-            src_doc = src_doc.replace('\n', args.newline).replace('\r', args.newline)
-            if args.sentences:
-                src_doc = src_doc.decode('utf-8', 'ignore')
-                tokenizer = PunktSentenceTokenizer(src_doc)
-                src_doc = tokenizer.tokenize(src_doc)
-                src_doc = [' '.join(parse_by_alpha(s)) for s in src_doc]
-                src_doc = [s.encode('utf-8', 'ignore') for s in src_doc]
-            else:
-                src_doc = parse_by_alpha(src_doc)
-                src_doc = [' '.join(src_doc[i:i + args.seq_len]) for i in xrange(0, len(src_doc), args.seq_len)]
-            dst_doc.write('\n'.join(src_doc))
-    print '\nDONE'
+    _process_dir(args.src, args.dst)
