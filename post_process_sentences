@@ -3,6 +3,7 @@
 # uniq's the lines, shuffles them, and aggregates them into a single file.
 
 if [ "$1" != "" ] && [ -d "$1" ]; then
+    echo "Trimming, uniq'ing, shuffling lines, and writing result to: ./uniq_shuf.txt"
     cat $1/* | cut -c -512 | sort | uniq | shuf > uniq_shuf.txt
 else
     echo "Must supply a path to a directory containing the txt files to be processed"
