@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 import sys
 import random
 
@@ -11,55 +12,60 @@ import tensorflow as tf
 import words
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--datadir', type=str, required=False)
-parser.add_argument('--restore', type=str, required=False)
-parser.add_argument('--savename', type=str, default='./embeded_sentences')
-parser.add_argument('--max_num', type=int, default=None)
-parser.add_argument('--write_examples', type=str, default='no', choices=['yes', 'no'])
-parser.add_argument('--project', type=str, default='no', choices=['yes', 'no'])
+parser.add_argument('--labels', type=str, required=True,
+    help='path to file containing one sentence on each line (each line should be unique)')
+parser.add_argument('--restore', type=str, required=False,
+    help='path to pretrained language model')
+parser.add_argument('--savename', type=str, default='./embeded_sentences',
+    help='where to save the resulting sentence encodings')
+parser.add_argument('--max_num', type=int, default=None,
+    help='the maximum number of sentences to encode')
+parser.add_argument('--write_examples', type=str, default='no', choices=['yes', 'no'],
+    help='whether or not to write a file with tuples of similar (nearby) sentences on each line')
+parser.add_argument('--project', type=str, default='no', choices=['yes', 'no'],
+    help='whether or not to run project and plot embeddings in 2D')
+parser.add_argument('--batch_size', type=int, default=256,
+    help='batch_size to use when encoding sentences')
 
-def get_sentence_embeds(savename, datadir, restore, max_num):
+def get_sentence_embeds(savename, datadir, restore, max_num, batch_size):
     embed_file = '{}.embeds.npy'.format(savename)
     if os.path.exists(embed_file):
         print 'loading precomputed embeddings: {}'.format(embed_file)
         sentence_embeds = np.load(embed_file)
-        labels = open('{}.labels'.format(savename)).readlines()
-        labels = [l.strip() for l in labels]
-        return sentence_embeds, labels
-    sentence_embeds, labels = compute_sentence_embeds(datadir, restore, savename, max_num)
-    return sentence_embeds, labels
+        return sentence_embeds
+    sentence_embeds = compute_sentence_embeds(datadir, restore, savename, max_num, batch_size)
+    return sentence_embeds
 
 def run_loop(sess, data, sentence_embeds_2_op, sentences_3_op, max_num):
     batch_num = 0
+    num_encoded = 0
     embeds = []
-    labels = []
+    start_time = time.time()
     while True:
         batch_num += 1
         try:
-            sentence_embeds_2, sentences_3 = sess.run([sentence_embeds_2_op, sentences_3_op])
-            sentences = data.array_to_strings(sentences_3, remove_stops=True)
+            sentence_embeds_2 = sess.run(sentence_embeds_2_op)
+            num_encoded += sentence_embeds_2.shape[0]
             embeds.append(sentence_embeds_2)
-            labels.extend(sentences)
         except tf.errors.OutOfRangeError as e:
             break
-        if max_num is not None and len(labels) >= max_num:
+        if max_num is not None and num_encoded >= max_num:
             break
-        if batch_num%50 == 1:
-            print '{} sentences encoded'.format(len(labels))
+        if batch_num%5 == 1:
+            sps = num_encoded/(time.time() - start_time)
+            print '{} sentences encoded ({} sentences/sec)\r'.format(num_encoded, sps),
             sys.stdout.flush()
-    print '{} sentences encoded'.format(len(labels))
+    print '{} sentences encoded'.format(num_encoded)
     sys.stdout.flush()
-    return np.concatenate(embeds, axis=0), labels
+    return np.concatenate(embeds, axis=0)
 
-def compute_sentence_embeds(datadir, restore, savename, max_num):
+def compute_sentence_embeds(datadir, restore, savename, max_num, batch_size):
     print 'computing sentence embeddings from model: {}'.format(restore)
-    model, _, data, sess = words.sess_setup(datadir, restore, batch_size=256)
-    embeds, labels = run_loop(sess, data, model.sentence_embeds_2, data.trg.to_tensor(-1), max_num)
+    model, _, data, sess = words.sess_setup(datadir, restore, batch_size=batch_size)
+    embeds = run_loop(sess, data, model.sentence_embeds_2, data.trg.to_tensor(-1), max_num)
     print embeds.shape
     np.save('{}.embeds.npy'.format(savename), embeds)
-    with open('{}.labels'.format(savename), 'w') as label_file:
-        label_file.write('\n'.join(labels))
-    return embeds, labels
+    return embeds
 
 def make_similars_examples(embeds, labels, n_nearby, savename):
     """
@@ -118,8 +124,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.write_examples = args.write_examples == 'yes'
     args.project = args.project == 'yes'
-    sentence_embeds, labels = get_sentence_embeds(args.savename, args.datadir, args.restore,
-        args.max_num)
+    sentence_embeds = get_sentence_embeds(args.savename, args.labels, args.restore,
+        args.max_num, args.batch_size)
+    labels = open(args.labels).readlines()[:sentence_embeds.shape[0]]
     show_similar(sentence_embeds, labels)
     if args.write_examples:
         make_similars_examples(sentence_embeds, labels, n_nearby=4, savename=args.savename)
