@@ -89,6 +89,7 @@ def make_similars_examples(embeds, labels, n_nearby, savename):
                 ind_row = ind_row[np.argsort(dist_row[ind_row])][1:] # sort, remove the query's idx
                 similar_sentences = [query_sentence]
                 similar_sentences.extend([labels[idx] for idx in ind_row])
+                similar_sentences = [s.strip() for s in similar_sentences]
                 out_file.write(' |SEP| '.join(similar_sentences) + '\n')
             num_processed += batch_size
             if batch % 2 == 0:
