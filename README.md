@@ -47,8 +47,7 @@ _It was almost dawn when he pulled into our driveway, the sky just beginning to 
 ### How it works
 The basic strategy is as follows:
 1) Pretrain the language model on a large corpus of text
-2) Extract sentence representations from the model
-   - Fixed-size, semantic sentence representations are implicitly learned by the model
+2) Extract sentence representations from the model (fixed-size representations are learned implicitly)
 3) Use these sentence representations to find nearby, semantically similar sentences
 4) Create a text dataset where each line is the concatenation of sentences whose encodings are nearby
 5) Fine-tune the model on this new dataset
@@ -60,9 +59,14 @@ The model architecture is hierarchical and consists of 3 parts:
 2. context-encoder
 3. word-decoder
 
-...
+### Word Encoder
+The word encoder looks up an embedding vector for each character in the word. The char embeddings are then modified with their relative position within the word and summed together to create a word vector. 
 
-todo
+### Context Encoder
+The context encoder is an attention-based recurrent model, which I have called the Self Attentive Recurrent Array. It is related to Transformers and Neural Turing Machines. It is just a feed forward layer with an array of previous values. When presented with a word vector, it uses multi-head attention to combine the current word with previous output values, then computes a new output vector and appends it to the memory array.
+
+### Word Decoder
+The word decoder predicts the next word in the stream using the output of the context encoder as a conditioning vector. It predicts each character of the word from the concatenated embeddings of previous characters. 
 
 ## Usage
 todo
