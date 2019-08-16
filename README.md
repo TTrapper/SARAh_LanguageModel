@@ -6,7 +6,15 @@ This is similar to work I completed for my Masters Thesis:
 
 https://dalspace.library.dal.ca/handle/10222/75034
 
-Once trained, the model generates a list of paraphrases for a given input sentence.  For example:
+Once trained, the model generates a list of "paraphrases" for a given input sentence. The paraphrase qualiy is better for concepts that are common in the training set, such as short descriptions of weather. For more complex inputs it may not paraphrase exactly, but it still manages to replicate the semantic flavour of the inputs. Sometimes it gets lucky and produces somethings rather insightful. For example:
+
+**Input:**
+_Earth is the origin of the human species._
+
+**Output:** _It is the original computer system of the gene pool._
+
+
+## Exampes:
 
 **Input:**
 _The rain fell from the sky._
@@ -25,14 +33,62 @@ _The thunder roared._
 - _The thunder rumbled._
 - _The rumble of thunder from the shooting plane echoed along the rooftops._
 
-
 **Input:**
-_The sun shone orange in the blue sky._
+_She walked through the forest with her dog._
 
 **Outputs:**
-- _The sun shone overhead._
-- _The sun shone bright orange on the horizon._
-- _The sun shone in the black sky._
+- _She walked in the woods with her dog._
+- _She walked along behind the little animal._ 
+- _She ran through the broken trees like an owl._
+
+**Input:**
+_A being of pure light that moved like water._                                               
+
+**Outputs:**
+- _A soul that was a star in the sky._
+- _A sickening spirit that was beyond human._
+- _A shining fire that floated in the air._ 
+
+**Input:**
+_Four candles lit the room in the far corner._
+
+**Outputs:**
+- _Two more candles illuminated the room._
+- _Two red beams lit the room._
+- _Two glass lamps hung from the window._
+- _Three ornate candles flickered in the hall._
+
+**Input:**
+_The ocean glittered with moonlight._
+
+**Outputs:**
+- _The sea shimmered with light._
+- _The sea seemed to glow in the sun._
+- _The sea was still and shining._
+
+**Input:**
+_The book was old and smelled of must and mildew._
+
+**Outputs:**
+- _It was strange and stained with dust and decay._
+- _The pantry was clean and spiced with the first leaves._
+- _It was young and fed well._
+
+**Input:**
+_Her smile left me speechless._
+
+**Outputs:**
+- _Her smile left me stunned._
+- _Her smile left me shocked._
+- _Her smile only made my heart beat a little faster._
+
+**Input:**
+_The crow stood black against a blue sky._
+
+**Outputs:**
+- _The beast was blue and pale._
+- _The creature was black as a star._
+- _The winged creature was black as a star ._
 
 **Input:**
 _It was almost dawn when he pulled into our driveway, the sky just beginning to tinge pink at the edges._
